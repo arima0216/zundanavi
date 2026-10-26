@@ -44,14 +44,7 @@ struct NavView: View {
                                     .textSelection(.enabled)
                             }
                         }
-                        if !model.lastReply.isEmpty {
-                            GroupBox("最後の返事") {
-                                Text(model.lastReply)
-                                    .fixedSize(horizontal: false, vertical: true)
-                                    .frame(maxWidth: .infinity, alignment: .leading)
-                                    .textSelection(.enabled)
-                            }
-                        }
+                        replyBox
                     }
                     .padding(16)
                     .frame(maxWidth: .infinity, alignment: .leading)
@@ -262,6 +255,36 @@ struct NavView: View {
             }
             .buttonStyle(.bordered)
             .font(.subheadline)
+            }
+        }
+    }
+
+    /// 返事エリア: 考え中（薄く）→ 返事（全文折り返し）／失敗
+    @ViewBuilder
+    private var replyBox: some View {
+        switch model.reply.phase {
+        case .waiting:
+            GroupBox("返事") {
+                Text(ReplyPane.waitingText)
+                    .foregroundStyle(.secondary)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
+            .opacity(0.7)
+        case .failed(let msg):
+            GroupBox("返事") {
+                Label(msg, systemImage: "exclamationmark.triangle.fill")
+                    .foregroundColor(.orange)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
+        case .idle:
+            if !model.reply.text.isEmpty {
+                GroupBox("最後の返事") {
+                    Text(model.reply.text)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .textSelection(.enabled)
+                }
             }
         }
     }

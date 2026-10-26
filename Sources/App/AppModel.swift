@@ -46,7 +46,9 @@ final class AppModel: ObservableObject {
     @Published private(set) var serverDetail = ""
     @Published var offlineBanner: String?
     @Published var card: CardInfo?
-    @Published private(set) var lastReply = ""
+    /// 返事エリア（考え中・返事・失敗）。履歴は HistoryStore 側に残る
+    @Published private(set) var reply = ReplyPane()
+    var lastReply: String { return reply.text }
     /// WP-2q: 直前に送った文（返事の上に吹き出しで出す）
     @Published private(set) var lastAsked = ""
     @Published var toast: String?
@@ -565,6 +567,7 @@ final class AppModel: ObservableObject {
         if !text.isEmpty {
             history.add(HistoryEntry(role: "user", text: text))
             lastAsked = text
+            reply.asked(requestID: rid)
             // ①端末内の認識文を即時に送る ②同じ request_id で録音を後追い
             Task {
                 await performAsk(text: text, wav: nil, mode: "voice", requestID: rid, primary: true)
@@ -576,6 +579,7 @@ final class AppModel: ObservableObject {
                 }
             }
         } else if let w = wav {
+            reply.asked(requestID: rid)
             Task {
                 await performAsk(text: nil, wav: w, mode: "voice", requestID: rid, primary: true)
             }
@@ -590,6 +594,7 @@ final class AppModel: ObservableObject {
         history.add(HistoryEntry(role: "user", text: t))
         lastAsked = TextFirst.stripFable(t)
         let rid = UUID().uuidString
+        reply.asked(requestID: rid)
         Task {
             await performAsk(text: t, wav: nil, mode: mode, requestID: rid, primary: true)
         }
@@ -624,6 +629,7 @@ final class AppModel: ObservableObject {
             if primary {
                 speech.cancelFillers()
                 reportFailure(error)
+                reply.failed(requestID: requestID, message: AppModel.failureText(error))
             }
         }
     }
@@ -643,7 +649,7 @@ final class AppModel: ObservableObject {
         spokenReplies[requestID] = played
         if spokenReplies.count > 50 { spokenReplies = [requestID: played] }
 
-        lastReply = r.textFull
+        reply.replied(r.textFull)
         history.add(HistoryEntry(role: "assistant", text: r.textFull, audioURL: r.audioURL))
         let url = r.audioURL
         let recent = url.map { recentlyPlayed($0) } ?? false
@@ -669,6 +675,14 @@ final class AppModel: ObservableObject {
             }
             speech.setData(item, data)
         }
+    }
+
+    static func failureText(_ error: Error) -> String {
+        var timedOut = false
+        if let u = error as? URLError, u.code == .timedOut { timedOut = true }
+        var auth = false
+        if let e = error as? APIError, case .unauthorized = e { auth = true }
+        return ReplyPane.failureMessage(timedOut: timedOut, unauthorized: auth)
     }
 
     private func reportFailure(_ error: Error) {
@@ -708,17 +722,21 @@ final class AppModel: ObservableObject {
         history.add(HistoryEntry(role: "user", text: "[写真] " + (n ?? "")))
         let api = self.api
         let gps = gpsForAsk
+        let rid = UUID().uuidString
+        lastAsked = "[写真] " + (n ?? "")
+        reply.asked(requestID: rid)
         Task {
             busyCount += 1
             playFiller("thinking")
             do {
                 let r = try await api.photo(jpeg: jpeg, note: n, gps: gps)
                 busyCount -= 1
-                handleReply(r, requestID: UUID().uuidString, userText: "[写真]")
+                handleReply(r, requestID: rid, userText: "[写真]")
             } catch {
                 busyCount -= 1
                 speech.cancelFillers()
                 reportFailure(error)
+                reply.failed(requestID: rid, message: AppModel.failureText(error))
             }
         }
     }
@@ -779,7 +797,7 @@ final class AppModel: ObservableObject {
         switch ev {
         case .speak(let seq, let url, let text):
             if !text.isEmpty {
-                lastReply = text
+                reply.replied(text)
                 history.add(HistoryEntry(role: "push", text: text, audioURL: url))
             }
             if let u = url, !recentlyPlayed(u) {

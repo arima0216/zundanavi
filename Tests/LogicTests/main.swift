@@ -356,5 +356,20 @@ do {
     check(p.claim("/v1/audio/b1", now: 400), "same url ok after window")
 }
 
+// ===== WP-2q: reply pane =====
+do {
+    var r = ReplyPane()
+    r.replied("前の返事")
+    r.asked(requestID: "q1")
+    check(r.phase == .waiting && r.text.isEmpty, "reply pane clears old reply on send")
+    r.replied("新しい返事")
+    check(r.phase == .idle && r.text == "新しい返事", "reply pane replaced by new reply")
+    r.asked(requestID: "q2")
+    r.failed(requestID: "q1", message: "x")
+    check(r.phase == .waiting, "reply pane ignores stale failure")
+    r.failed(requestID: "q2", message: ReplyPane.failureMessage(timedOut: true, unauthorized: false))
+    if case .failed(let m) = r.phase { check(m.contains("時間切れ"), "reply pane timeout message") } else { check(false, "reply pane failed phase") }
+}
+
 print("logic tests: \(passes) passed, \(failures) failed")
 if failures > 0 { exit(1) }
