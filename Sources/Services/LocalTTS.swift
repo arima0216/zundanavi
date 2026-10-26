@@ -35,7 +35,7 @@ final class LocalTTS {
 }
 
 /// write(_:toBufferCallback:) のバッファを集める（コールバックは任意スレッド）。
-final class PCMCollector {
+final class PCMCollector: @unchecked Sendable {
     var onFinish: ((Data?) -> Void)?
     private let lock = NSLock()
     private var samples: [Float] = []
