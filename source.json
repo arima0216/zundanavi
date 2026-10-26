@@ -1,0 +1,21 @@
+{
+  "name": "Momo ZundaNavi Source",
+  "identifier": "dev.momo.zundanavi.source",
+  "subtitle": "ZundaNavi updates",
+  "description": "Personal SideStore source for ZundaNavi. Updated automatically by GitHub Actions.",
+  "iconURL": "https://raw.githubusercontent.com/arima0216/zundanavi/main/icon.png",
+  "website": "https://github.com/arima0216/zundanavi",
+  "apps": [
+    {
+      "name": "ZundaNavi",
+      "bundleIdentifier": "dev.momo.zundanavi",
+      "developerName": "momo",
+      "subtitle": "Voice travel navigator",
+      "localizedDescription": "Ask by voice (wake word or push-to-talk) with GPS attached; replies are played back in Zundamon's voice. Talks to a private server over Tailscale.",
+      "iconURL": "https://raw.githubusercontent.com/arima0216/zundanavi/main/icon.png",
+      "tintColor": "#4CAF50",
+      "screenshots": [],
+      "versions": []
+    }
+  ]
+}

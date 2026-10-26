@@ -1,0 +1,114 @@
+name: build-ipa
+
+on:
+  push:
+    branches: [main]
+    paths-ignore:
+      - "source.json"
+      - "README.md"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: macos-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Show toolchain
+        run: |
+          xcodebuild -version
+          swift --version
+
+      # Pure-Foundation logic (models, multipart, wav, wake word, router) runs as a CLI test.
+      - name: Logic tests
+        run: |
+          swiftc -o logictests Sources/Core/*.swift Tests/LogicTests/main.swift
+          ./logictests
+
+      - name: Install XcodeGen
+        run: brew install xcodegen
+
+      - name: Generate Xcode project
+        run: xcodegen generate
+
+      # SideStore/AltStore re-signs the app on install, so build unsigned here.
+      - name: Build (unsigned)
+        run: |
+          set -o pipefail
+          xcodebuild \
+            -project ZundaNavi.xcodeproj \
+            -scheme ZundaNavi \
+            -configuration Release \
+            -sdk iphoneos \
+            -derivedDataPath build \
+            CODE_SIGN_IDENTITY="" \
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGNING_ALLOWED=NO \
+            build 2>&1 | tee build.log | grep -E "error:|warning: .*(deprecated|isolat)|BUILD (SUCCEEDED|FAILED)" || true
+          test -d build/Build/Products/Release-iphoneos/ZundaNavi.app
+
+      - name: Upload build log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: build-log
+          path: build.log
+          if-no-files-found: ignore
+
+      - name: Package .ipa
+        run: |
+          mkdir -p Payload
+          cp -R build/Build/Products/Release-iphoneos/ZundaNavi.app Payload/
+          zip -qry ZundaNavi.ipa Payload
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ZundaNavi-ipa
+          path: ZundaNavi.ipa
+          if-no-files-found: error
+
+      - name: Read version
+        id: ver
+        run: |
+          V=$(grep 'MARKETING_VERSION' project.yml | head -1 | sed 's/.*"\(.*\)".*/\1/')
+          echo "version=$V" >> "$GITHUB_OUTPUT"
+
+      - name: Create GitHub release with ipa
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          TAG="v${{ steps.ver.outputs.version }}"
+          gh release delete "$TAG" --cleanup-tag -y || true
+          gh release create "$TAG" ZundaNavi.ipa --title "ZundaNavi $TAG" --notes "Automated build from $GITHUB_SHA"
+
+      - name: Update source.json for SideStore
+        run: |
+          TAG="v${{ steps.ver.outputs.version }}"
+          SIZE=$(stat -f%z ZundaNavi.ipa)
+          DATE=$(date -u +%Y-%m-%d)
+          python3 - "$TAG" "$SIZE" "$DATE" <<'EOF'
+          import json, sys
+          tag, size, date = sys.argv[1], int(sys.argv[2]), sys.argv[3]
+          version = tag.lstrip("v")
+          with open("source.json") as f:
+              src = json.load(f)
+          url = f"https://github.com/arima0216/zundanavi/releases/download/{tag}/ZundaNavi.ipa"
+          entry = {"version": version, "date": date, "downloadURL": url,
+                   "size": size, "minOSVersion": "17.0",
+                   "localizedDescription": f"Automated build {tag}."}
+          versions = [v for v in src["apps"][0]["versions"] if v["version"] != version]
+          src["apps"][0]["versions"] = [entry] + versions
+          with open("source.json", "w") as f:
+              json.dump(src, f, ensure_ascii=False, indent=2)
+              f.write("\n")
+          EOF
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add source.json
+          git commit -m "source.json: ${TAG}" || exit 0
+          git pull --rebase origin main
+          git push origin main
