@@ -32,9 +32,22 @@ struct NavView: View {
                         statusGrid
                         cardBox
                         walkBox
+                        if !model.lastAsked.isEmpty {
+                            HStack {
+                                Spacer(minLength: 48)
+                                Text(model.lastAsked)
+                                    .font(.subheadline)
+                                    .fixedSize(horizontal: false, vertical: true)
+                                    .padding(.horizontal, 12)
+                                    .padding(.vertical, 8)
+                                    .background(zundaGreen.opacity(0.18), in: RoundedRectangle(cornerRadius: 14))
+                                    .textSelection(.enabled)
+                            }
+                        }
                         if !model.lastReply.isEmpty {
                             GroupBox("最後の返事") {
                                 Text(model.lastReply)
+                                    .fixedSize(horizontal: false, vertical: true)
                                     .frame(maxWidth: .infinity, alignment: .leading)
                                     .textSelection(.enabled)
                             }
@@ -202,19 +215,7 @@ struct NavView: View {
         VStack(alignment: .leading, spacing: 10) {
             chipRow
             HStack(alignment: .bottom, spacing: 8) {
-                TextField("文字で聞く", text: $inputText, axis: .vertical)
-                    .lineLimit(1...3)
-                    .focused($inputFocused)
-                    .textFieldStyle(.roundedBorder)
-                    .submitLabel(.send)
-                    .onSubmit { sendText() }
-                    .onChange(of: inputText) { _, v in
-                        // 縦伸びの入力欄はリターンで改行が入るので、それを送信の合図にする
-                        if v.contains("\n") {
-                            inputText = v.replacingOccurrences(of: "\n", with: "")
-                            sendText()
-                        }
-                    }
+                inputBox
                 Button {
                     sendText()
                 } label: {
@@ -250,6 +251,7 @@ struct NavView: View {
                  : "マイク: 押しっぱなしで話す／短く押すと自動で終わる")
                 .font(.caption2)
                 .foregroundStyle(.secondary)
+            if !inputFocused {
             HStack(spacing: 8) {
                 Button("ナビ開始") { model.startNavButton() }
                     .frame(maxWidth: .infinity)
@@ -260,7 +262,44 @@ struct NavView: View {
             }
             .buttonStyle(.bordered)
             .font(.subheadline)
+            }
         }
+    }
+
+    /// 入力欄: 大きめの文字で 1〜8 行まで上へ伸びる。空でなければ右端に全消去
+    private var inputBox: some View {
+        HStack(alignment: .top, spacing: 6) {
+            TextField("文字で聞く", text: $inputText, axis: .vertical)
+                .font(.title3)
+                .lineSpacing(2)
+                .lineLimit(1...8)
+                .focused($inputFocused)
+                .submitLabel(.send)
+                .onSubmit { sendText() }
+                .onChange(of: inputText) { _, v in
+                    // 縦伸びの入力欄はリターンで改行が入るので、それを送信の合図にする
+                    if v.contains("\n") {
+                        inputText = v.replacingOccurrences(of: "\n", with: "")
+                        sendText()
+                    }
+                }
+            if !inputText.isEmpty {
+                Button {
+                    inputText = ""
+                } label: {
+                    Image(systemName: "xmark.circle.fill")
+                        .font(.title3)
+                        .foregroundStyle(.secondary)
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("入力を消す")
+            }
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 8)
+        .background(Color(.secondarySystemBackground), in: RoundedRectangle(cornerRadius: 12))
+        .overlay(RoundedRectangle(cornerRadius: 12).stroke(inputFocused ? zundaGreen.opacity(0.6) : Color.secondary.opacity(0.25), lineWidth: 1))
+        .animation(.easeOut(duration: 0.15), value: inputText.isEmpty)
     }
 
     /// 定型チップ＋送信履歴チップ（横スクロール）

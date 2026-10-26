@@ -47,6 +47,8 @@ final class AppModel: ObservableObject {
     @Published var offlineBanner: String?
     @Published var card: CardInfo?
     @Published private(set) var lastReply = ""
+    /// WP-2q: 直前に送った文（返事の上に吹き出しで出す）
+    @Published private(set) var lastAsked = ""
     @Published var toast: String?
     @Published private(set) var wsConnected = false
     @Published private(set) var gpsText = "GPS --"
@@ -562,6 +564,7 @@ final class AppModel: ObservableObject {
         let wav: Data? = samples.count > AppModel.sampleRate * 3 / 10 ? WavEncoder.encode(floats: samples, sampleRate: AppModel.sampleRate) : nil
         if !text.isEmpty {
             history.add(HistoryEntry(role: "user", text: text))
+            lastAsked = text
             // ①端末内の認識文を即時に送る ②同じ request_id で録音を後追い
             Task {
                 await performAsk(text: text, wav: nil, mode: "voice", requestID: rid, primary: true)
@@ -585,6 +588,7 @@ final class AppModel: ObservableObject {
         let t = raw.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !t.isEmpty else { return }
         history.add(HistoryEntry(role: "user", text: t))
+        lastAsked = TextFirst.stripFable(t)
         let rid = UUID().uuidString
         Task {
             await performAsk(text: t, wav: nil, mode: mode, requestID: rid, primary: true)
@@ -629,6 +633,7 @@ final class AppModel: ObservableObject {
         var played = spokenReplies[requestID] ?? []
         if userText == nil, played.isEmpty, let tr = r.transcript, !tr.isEmpty {
             history.add(HistoryEntry(role: "user", text: tr))
+            lastAsked = tr
         }
         // 後追いの返事が同じ内容（または空）なら鳴らさない
         if !played.isEmpty && (voice.isEmpty || played.contains(voice)) {
