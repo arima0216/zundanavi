@@ -507,7 +507,8 @@ final class AppModel: ObservableObject {
             wakeLastPartialText = text
             wakeAfterText = m.after
             AppModel.log.info("wake word detected")
-            playFiller("heard")
+            // 聞き始めの合図（短いビープ）。「heard」は切り出し終了後に鳴らす
+            speech.playFiller(WavEncoder.beep(frequency: 1320, duration: 0.08))
             startEndTimer()
         case .recording:
             break
@@ -531,6 +532,7 @@ final class AppModel: ObservableObject {
             break
         }
 
+        playFiller("heard")
         let rid = UUID().uuidString
         let wav: Data? = samples.count > AppModel.sampleRate * 3 / 10 ? WavEncoder.encode(floats: samples, sampleRate: AppModel.sampleRate) : nil
         if !text.isEmpty {
