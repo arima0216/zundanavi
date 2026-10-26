@@ -28,13 +28,25 @@ final class AppModel: ObservableObject {
     let battery = BatteryLogger()
     private let capture = AudioCapture()
     private let wake = WakeWordListener()
+    // WP-2n: 徒歩ナビ・ジオフェンス・台本・デッキ（処理は AppModel+Nav.swift）
+    let nav = NavEngine()
+    let script = ScriptPlayer()
+    let localTTS = LocalTTS()
+    var fenceTracker = FenceTracker()
+    @Published var fences: [FenceInfo] = []
+    @Published var deck: ActionDeck?
+    @Published var activeSheet: ActiveSheet?
+    @Published var navActive = false
+    var lastLegID: String?
+    /// 最近ローカルで鳴らした音声 URL（サーバー push との二重再生を防ぐ）
+    var recentAudio: [String: Date] = [:]
 
     @Published private(set) var listenState: ListenState = .idle
     @Published private(set) var busyCount = 0
     @Published private(set) var serverOK: Bool?
     @Published private(set) var serverDetail = ""
     @Published var offlineBanner: String?
-    @Published private(set) var card: CardInfo?
+    @Published var card: CardInfo?
     @Published private(set) var lastReply = ""
     @Published var toast: String?
     @Published private(set) var wsConnected = false
@@ -90,8 +102,8 @@ final class AppModel: ObservableObject {
         events.makeRequest = { [weak self] in
             return self?.api.eventsRequest()
         }
-        events.onEvent = { [weak self] ev in
-            self?.handleEvent(ev)
+        events.onEvent = { [weak self] ev, raw in
+            self?.handleEvent(ev, raw: raw)
         }
         events.$connected
             .receive(on: RunLoop.main)
@@ -109,7 +121,9 @@ final class AppModel: ObservableObject {
             .store(in: &cancellables)
         location.onUpdate = { [weak self] l in
             self?.locationUpdated(l)
+            self?.navLocationUpdated(l)
         }
+        setUpNav()
         wake.onPartial = { [weak self] text in
             self?.wakePartial(text)
         }
@@ -245,7 +259,7 @@ final class AppModel: ObservableObject {
 
     func refreshCard() async {
         do {
-            card = try await api.card()
+            setCard(try await api.card())
         } catch {
             AppModel.log.info("card fetch failed: \(error.localizedDescription, privacy: .public)")
         }
@@ -289,7 +303,7 @@ final class AppModel: ObservableObject {
         }
     }
 
-    private func playFiller(_ name: String) {
+    func playFiller(_ name: String) {
         let data: Data
         if let d = fillers[name] {
             data = d
@@ -528,7 +542,11 @@ final class AppModel: ObservableObject {
         switch CommandRouter.route(text) {
         case .quiet(let minutes):
             quiet(minutes: minutes)
-        case .startNav, .endNav, .plain:
+        case .startNav:
+            startNavLocal()
+        case .endNav:
+            stopNavLocal()
+        case .plain:
             break
         }
 
@@ -623,7 +641,7 @@ final class AppModel: ObservableObject {
         }
     }
 
-    private func fetchAudio(_ url: String, into item: SpeechQueue.Item) {
+    func fetchAudio(_ url: String, into item: SpeechQueue.Item) {
         let api = self.api
         Task {
             var data: Data?
@@ -740,14 +758,14 @@ final class AppModel: ObservableObject {
 
     // MARK: - WS イベント
 
-    private func handleEvent(_ ev: WSEvent) {
+    private func handleEvent(_ ev: WSEvent, raw: Data) {
         switch ev {
         case .speak(let seq, let url, let text):
             if !text.isEmpty {
                 lastReply = text
                 history.add(HistoryEntry(role: "push", text: text, audioURL: url))
             }
-            if let u = url {
+            if let u = url, !recentlyPlayed(u) {
                 let item = speech.enqueueSpeak(seq: seq)
                 fetchAudio(u, into: item)
             }
@@ -759,9 +777,14 @@ final class AppModel: ObservableObject {
                 fetchAudio(u, into: item)
             }
         case .card(let c):
-            card = c
+            setCard(c)
         case .deck(let count):
             AppModel.log.info("deck event items=\(count)")
+            if let d = ActionDeck.parse(raw) {
+                receiveDeck(d)
+            }
+        case .script(let id, let stepIdx, let action):
+            scriptEvent(id: id, stepIdx: stepIdx, action: action)
         case .unknown(let t):
             AppModel.log.info("unknown ws event \(t, privacy: .public)")
         }

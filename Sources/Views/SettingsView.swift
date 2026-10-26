@@ -50,6 +50,12 @@ struct SettingsView: View {
                         .foregroundStyle(.secondary)
                 }
 
+                Section("徒歩ナビ") {
+                    Toggle("徒歩ナビ音声", isOn: $settings.walkVoiceEnabled)
+                    Toggle("自動再探索", isOn: $settings.autoReroute)
+                    Toggle("端末合成にフォールバック", isOn: $settings.localTTSFallback)
+                }
+
                 Section("位置") {
                     Toggle("GPS を送る", isOn: $settings.gpsSendEnabled)
                     Text(model.gpsText)

@@ -166,5 +166,158 @@ check(CommandRouter.route("３０分しずかにして") == .quiet(minutes: 30),
 check(CommandRouter.route("今どこ") == .plain, "cmd none")
 check(CommandRouter.route("") == .plain, "cmd empty")
 
+// ===== WP-2n: nav / fences / script / deck =====
+
+// --- Geo ---
+do {
+    let a = Coord(31.58, 130.54)
+    let b = Geo.offset(a, northMeters: 300, eastMeters: 0)
+    check(abs(Geo.distance(a, b) - 300) < 0.5, "geo distance 300m")
+    let p = Geo.offset(a, northMeters: 150, eastMeters: 50)
+    check(abs(Geo.distanceToPolyline(p, [a, b]) - 50) < 0.5, "geo polyline 50m")
+    let q = Geo.offset(a, northMeters: -30, eastMeters: 40)
+    check(abs(Geo.distanceToPolyline(q, [a, b]) - 50) < 0.5, "geo polyline endpoint")
+    check(Geo.distanceToPolyline(p, []) == .infinity, "geo empty line")
+}
+
+// --- StepTracker: 100m -> 20m -> pass, inaccurate fixes ignored ---
+do {
+    let o = Coord(31.58, 130.54)
+    let s0 = NavStep(idx: 0, instruction: "右折", point: Geo.offset(o, northMeters: 300, eastMeters: 0), distanceM: 300)
+    let s1 = NavStep(idx: 1, instruction: "左折", point: Geo.offset(o, northMeters: 300, eastMeters: 200), distanceM: 200)
+    let dest = Geo.offset(o, northMeters: 300, eastMeters: 400)
+    var t = StepTracker(steps: [s0, s1], destination: dest)
+    var cues: [NavCue] = []
+    check(t.update(s0.point, accuracy: 80).isEmpty, "tracker ignores acc>50")
+    check(t.current == 0, "tracker still step0 after bad fix")
+    var n = 0.0
+    while n <= 300 {
+        cues += t.update(Geo.offset(o, northMeters: n, eastMeters: 0), accuracy: 5)
+        n += 10
+    }
+    check(cues == [.approach(0), .at(0)], "tracker step0 approach then at")
+    var e = 10.0
+    while e <= 400 && !t.arrived {
+        cues += t.update(Geo.offset(o, northMeters: 300, eastMeters: e), accuracy: 5)
+        e += 10
+    }
+    check(cues == [.approach(0), .at(0), .approach(1), .at(1), .arrived], "tracker full sequence")
+    check(t.arrived, "tracker arrived")
+    check(t.update(dest, accuracy: 5).isEmpty, "tracker silent after arrival")
+}
+do {
+    // 20 m 以内から始まる手順点は approach を飛ばして at だけ
+    let o = Coord(33.59, 130.42)
+    let s0 = NavStep(idx: 0, instruction: "Turn right", point: Geo.offset(o, northMeters: 15, eastMeters: 0), distanceM: 15)
+    var t = StepTracker(steps: [s0], destination: Geo.offset(o, northMeters: 15, eastMeters: 300))
+    check(t.update(o, accuracy: 10) == [.at(0)], "tracker near start gives at only")
+}
+
+// --- OffRouteDetector ---
+do {
+    var d = OffRouteDetector()
+    check(d.update(distanceToRoute: 50, accuracy: 5, time: 0) == false, "offroute 1st")
+    check(d.update(distanceToRoute: 50, accuracy: 5, time: 3) == false, "offroute 2nd but <5s")
+    check(d.update(distanceToRoute: 50, accuracy: 5, time: 6) == true, "offroute trigger")
+    check(d.update(distanceToRoute: 50, accuracy: 5, time: 10) == false, "offroute count reset")
+    check(d.update(distanceToRoute: 50, accuracy: 5, time: 16) == false, "offroute cooldown")
+    check(d.update(distanceToRoute: 50, accuracy: 5, time: 30) == true, "offroute after cooldown")
+    var d2 = OffRouteDetector()
+    _ = d2.update(distanceToRoute: 50, accuracy: 5, time: 0)
+    _ = d2.update(distanceToRoute: 10, accuracy: 5, time: 3)
+    check(d2.update(distanceToRoute: 50, accuracy: 5, time: 6) == false, "offroute back on route resets")
+    check(d2.update(distanceToRoute: 90, accuracy: 80, time: 9) == false, "offroute ignores acc>50")
+    check(d2.update(distanceToRoute: 50, accuracy: 5, time: 12) == true, "offroute bad fix not counted as reset")
+}
+
+// --- FenceTracker: hysteresis + 3 min suppression ---
+do {
+    let c = Coord(33.59, 130.40)
+    var f = FenceTracker()
+    f.setFences([FenceTracker.Fence(id: "hotel", center: c, radius: 30)])
+    func at(_ m: Double) -> Coord { return Geo.offset(c, northMeters: m, eastMeters: 0) }
+    check(f.update(at(40), accuracy: 5, time: 0).isEmpty, "fence outside")
+    check(f.update(at(25), accuracy: 5, time: 10) == ["hotel"], "fence enter")
+    check(f.update(at(35), accuracy: 5, time: 20).isEmpty, "fence hysteresis keeps inside")
+    check(f.inside.contains("hotel"), "fence still inside at 35m")
+    _ = f.update(at(45), accuracy: 5, time: 30)
+    check(!f.inside.contains("hotel"), "fence exit beyond 1.3x")
+    check(f.update(at(25), accuracy: 5, time: 70).isEmpty, "fence re-enter suppressed")
+    _ = f.update(at(45), accuracy: 5, time: 80)
+    check(f.update(at(25), accuracy: 5, time: 200) == ["hotel"], "fence fires after 3 min")
+    check(f.externalEnter("hotel", time: 250) == false, "fence external suppressed")
+    check(f.externalEnter("gate", time: 250) == true, "fence external new id")
+    check(f.update(at(0), accuracy: 99, time: 1000).isEmpty, "fence ignores acc>50")
+}
+
+// --- DirectionParser ---
+check(DirectionParser.parse("右折してください") == .right, "dir ja right")
+check(DirectionParser.parse("左に曲がります") == .left, "dir ja left")
+check(DirectionParser.parse("直進します") == .straight, "dir ja straight")
+check(DirectionParser.parse("目的地は右側です") == .arrive, "dir ja arrive")
+check(DirectionParser.parse("Uターンします") == .uturn, "dir ja uturn")
+check(DirectionParser.parse("Turn left onto Main St") == .left, "dir en left")
+check(DirectionParser.parse("Slight right") == .right, "dir en right")
+check(DirectionParser.parse("Continue onto Route 3") == .straight, "dir en straight")
+check(DirectionParser.parse("The destination is on your right") == .arrive, "dir en arrive")
+check(DirectionParser.parse("国道3号線に入ります") == .unknown, "dir unknown")
+check(DirectionParser.approachText("右折") == "あと100メートルで右なのだ", "dir approach text")
+check(DirectionParser.atText("Turn left") == "ここを左なのだ", "dir at text")
+check(DirectionParser.atText("国道3号線に入ります") == "国道3号線に入ります", "dir at text raw")
+
+// --- ActionDeck ---
+do {
+    let deck = ActionDeck.parse(data("{\"type\":\"deck\",\"items\":[{\"n\":2,\"title\":\"GO を開く\",\"url\":\"go://\"},{\"n\":1,\"title\":\"地図\",\"url\":\"https://maps.apple.com/?q=x\"},{\"n\":3,\"title\":\"Uber\",\"url\":\"uber://\"}]}"))
+    check(deck?.items.map { $0.n } == [1, 2, 3], "deck sorted by n")
+    var d = deck ?? ActionDeck(items: [])
+    check(d.current?.n == 1, "deck current first")
+    d.markDone(1)
+    check(d.current?.n == 2 && d.isDone(1), "deck next after done")
+    d.markDone(3)
+    check(d.current?.n == 2, "deck skips done out of order")
+    d.markDone(9)
+    check(d.done.count == 2, "deck ignores unknown n")
+    d.markDone(2)
+    check(d.current == nil && d.allDone, "deck all done")
+}
+
+// --- ScriptCursor ---
+do {
+    var c = ScriptCursor(idx: 0, count: 3)
+    c.apply("next")
+    c.apply("next")
+    c.apply("next")
+    check(c.idx == 2, "script next clamps")
+    c.apply("repeat")
+    check(c.idx == 2, "script repeat stays")
+    c.apply("prev")
+    c.apply("prev")
+    c.apply("prev")
+    check(c.idx == 0, "script prev clamps")
+    c.go(7)
+    check(c.idx == 2, "script go clamps")
+}
+
+// --- v1.1 models ---
+do {
+    let c = try CardInfo.decode(data("{\"where\":\"博多駅\",\"leg_id\":\"L2\",\"next_place\":{\"id\":\"hotel\",\"name\":\"ホテル\",\"lat\":33.59,\"lon\":130.40},\"taxi\":{\"label\":\"GO\",\"url\":\"go://\"}}"))
+    check(c.nextPlace?.id == "hotel" && c.nextPlace?.lat == 33.59, "card next_place")
+    check(c.taxi?.url == "go://", "card taxi")
+    check(c.legID == "L2", "card leg")
+    check(c.rows.count == 1, "card rows unaffected")
+    let c2 = try CardInfo.decode(data("{\"where\":\"x\",\"next_place\":null,\"taxi\":null}"))
+    check(c2.nextPlace == nil && c2.taxi == nil, "card null v1.1 fields")
+    let fs = try FenceInfo.decodeList(data("{\"fences\":[{\"id\":\"f1\",\"lat\":33.5,\"lon\":130.4,\"radius_m\":40,\"on_enter\":{\"say\":\"着いた\",\"script_id\":\"s1\"},\"say_audio\":\"/v1/audio/f1\"},{\"id\":\"bad\"}]}"))
+    check(fs.count == 1 && fs[0].scriptID == "s1" && fs[0].radiusM == 40 && fs[0].sayAudio == "/v1/audio/f1", "fences decode")
+    let sc = try ScriptInfo.decode(data("{\"id\":\"s1\",\"title\":\"博多駅 筑紫口\",\"steps\":[{\"idx\":1,\"text\":\"右の改札\",\"audio_url\":\"/v1/audio/b\"},{\"idx\":0,\"text\":\"降りたら左\",\"audio_url\":null,\"landmark\":\"時計\"}]}"))
+    check(sc.steps.map { $0.idx } == [0, 1] && sc.steps[0].audioURL == nil && sc.steps[0].landmark == "時計", "script decode")
+    let ra = try RouteAudio.decode(data("{\"route_id\":\"r1\",\"steps\":[{\"idx\":0,\"text_approach\":\"あと100\",\"audio_approach\":\"/v1/audio/a0\",\"text_at\":\"ここ\",\"audio_at\":\"/v1/audio/t0\"}],\"offroute_audio\":\"/v1/audio/off\",\"arrived_audio\":null}"))
+    check(ra.steps[0]?.audioAt == "/v1/audio/t0" && ra.offrouteAudio == "/v1/audio/off" && ra.arrivedAudio == nil, "route audio decode")
+    let ev = WSEvent.parse(data("{\"type\":\"script\",\"script_id\":\"s1\",\"action\":\"next\"}"))
+    check(ev == .script(id: "s1", stepIdx: nil, action: "next"), "ws script")
+} catch {
+    check(false, "v1.1 models threw \(error)")
+}
+
 print("logic tests: \(passes) passed, \(failures) failed")
 if failures > 0 { exit(1) }

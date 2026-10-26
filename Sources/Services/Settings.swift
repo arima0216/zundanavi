@@ -74,6 +74,18 @@ final class AppSettings: ObservableObject {
     @Published var batteryLogEnabled: Bool {
         didSet { ud.set(batteryLogEnabled, forKey: "batteryLogEnabled") }
     }
+    /// WP-2n: 徒歩ナビの音声
+    @Published var walkVoiceEnabled: Bool {
+        didSet { ud.set(walkVoiceEnabled, forKey: "walkVoiceEnabled") }
+    }
+    /// WP-2n: 経路外れで自動再探索
+    @Published var autoReroute: Bool {
+        didSet { ud.set(autoReroute, forKey: "autoReroute") }
+    }
+    /// WP-2n: サーバー音声が無い時は端末合成
+    @Published var localTTSFallback: Bool {
+        didSet { ud.set(localTTSFallback, forKey: "localTTSFallback") }
+    }
 
     init() {
         let d = UserDefaults.standard
@@ -83,6 +95,9 @@ final class AppSettings: ObservableObject {
         micSource = MicSource(rawValue: d.string(forKey: "micSource") ?? "") ?? .earphone
         gpsSendEnabled = d.object(forKey: "gpsSendEnabled") as? Bool ?? true
         batteryLogEnabled = d.object(forKey: "batteryLogEnabled") as? Bool ?? false
+        walkVoiceEnabled = d.object(forKey: "walkVoiceEnabled") as? Bool ?? true
+        autoReroute = d.object(forKey: "autoReroute") as? Bool ?? true
+        localTTSFallback = d.object(forKey: "localTTSFallback") as? Bool ?? true
     }
 
     var appVersion: String {

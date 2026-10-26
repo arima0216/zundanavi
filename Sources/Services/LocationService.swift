@@ -11,6 +11,8 @@ final class LocationService: NSObject, ObservableObject, CLLocationManagerDelega
 
     /// 位置が更新されるたびに呼ぶ
     var onUpdate: ((CLLocation) -> Void)?
+    /// OS のリージョン監視で進入した（保険。主判定はソフトウェア）
+    var onRegionEnter: ((String) -> Void)?
 
     private let manager = CLLocationManager()
     private var askedAlways = false
@@ -112,5 +114,30 @@ final class LocationService: NSObject, ObservableObject, CLLocationManagerDelega
 
     nonisolated func locationManager(_ manager: CLLocationManager, didFailWithError error: Error) {
         LocationService.log.error("location error: \(error.localizedDescription, privacy: .public)")
+    }
+    /// ジオフェンスの保険: CLCircularRegion を最大 20 個監視する（先頭=現在区間を優先）。
+    func monitor(fences: [FenceInfo]) {
+        for r in manager.monitoredRegions {
+            manager.stopMonitoring(for: r)
+        }
+        guard CLLocationManager.isMonitoringAvailable(for: CLCircularRegion.self) else { return }
+        for f in fences.prefix(20) {
+            let radius = min(max(f.radiusM, 1), manager.maximumRegionMonitoringDistance)
+            let r = CLCircularRegion(center: CLLocationCoordinate2D(latitude: f.lat, longitude: f.lon), radius: radius, identifier: f.id)
+            r.notifyOnEntry = true
+            r.notifyOnExit = false
+            manager.startMonitoring(for: r)
+        }
+    }
+
+    nonisolated func locationManager(_ manager: CLLocationManager, didEnterRegion region: CLRegion) {
+        let id = region.identifier
+        Task { @MainActor in
+            self.onRegionEnter?(id)
+        }
+    }
+
+    nonisolated func locationManager(_ manager: CLLocationManager, monitoringDidFailFor region: CLRegion?, withError error: Error) {
+        LocationService.log.info("region monitoring failed: \(error.localizedDescription, privacy: .public)")
     }
 }

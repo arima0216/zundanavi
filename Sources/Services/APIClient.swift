@@ -129,4 +129,58 @@ struct APIClient {
         r.setValue(token, forHTTPHeaderField: "X-Trip-Token")
         return r
     }
+    // MARK: - v1.1
+
+    private func postJSON(_ path: String, _ body: [String: Any], timeout: TimeInterval = APIClient.defaultTimeout) async throws -> Data {
+        var req = try makeRequest(path, method: "POST", timeout: timeout)
+        req.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        req.httpBody = try JSONSerialization.data(withJSONObject: body)
+        return try await send(req)
+    }
+
+    func route(body: [String: Any]) async throws -> RouteAudio {
+        let data = try await postJSON("/v1/route", body, timeout: 60)
+        do { return try RouteAudio.decode(data) } catch { throw APIError.decode }
+    }
+
+    /// 無ければ空（404）。
+    func fences(date: String, leg: String?) async throws -> [FenceInfo] {
+        var path = "/v1/fences?date=" + date
+        if let l = leg, let enc = l.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) {
+            path += "&leg=" + enc
+        }
+        do {
+            let data = try await send(makeRequest(path))
+            do { return try FenceInfo.decodeList(data) } catch { throw APIError.decode }
+        } catch APIError.notFound {
+            return []
+        }
+    }
+
+    func fenceEnter(id: String, ts: Double) async throws {
+        _ = try await postJSON("/v1/fence_enter", ["fence_id": id, "ts": ts])
+    }
+
+    func script(id: String) async throws -> ScriptInfo {
+        let enc = id.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? id
+        let data = try await send(makeRequest("/v1/script/" + enc))
+        do { return try ScriptInfo.decode(data) } catch { throw APIError.decode }
+    }
+
+    func scriptStep(id: String, action: String) async throws {
+        let enc = id.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? id
+        _ = try await postJSON("/v1/script/" + enc + "/step", ["action": action])
+    }
+
+    func speakBatch(_ items: [(id: String, text: String)]) async throws -> [String: String] {
+        let body: [String: Any] = ["items": items.map { ["id": $0.id, "text": $0.text] }]
+        let data = try await postJSON("/v1/speak_batch", body, timeout: 60)
+        let json = try JSONValue.parse(data)
+        var out: [String: String] = [:]
+        for (k, v) in json.objectValue ?? [:] {
+            if let s = v.stringValue { out[k] = s }
+        }
+        return out
+    }
+
 }

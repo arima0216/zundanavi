@@ -8,7 +8,8 @@ final class EventsClient: ObservableObject {
 
     @Published private(set) var connected = false
 
-    var onEvent: ((WSEvent) -> Void)?
+    /// (イベント, 生の JSON)
+    var onEvent: ((WSEvent, Data) -> Void)?
     /// 接続のたびに設定から要求を作る
     var makeRequest: (() -> URLRequest?)?
 
@@ -104,7 +105,7 @@ final class EventsClient: ObservableObject {
             @unknown default: data = nil
             }
             if let d = data, let ev = WSEvent.parse(d) {
-                onEvent?(ev)
+                onEvent?(ev, d)
             }
             receive(t, gen)
         case .failure(let err):

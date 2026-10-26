@@ -92,6 +92,12 @@ struct CardInfo: Equatable {
     var updated: String?
     var rows: [CardRow]
     var voiceURL: String?
+    /// v1.1: 徒歩経路の目的地
+    var nextPlace: NavPlace?
+    /// v1.1: あればナビ画面に「タクシー」ボタン
+    var taxi: TaxiLink?
+    /// v1.1: 今の区間（変わったらジオフェンスを取り直す）
+    var legID: String?
 
     struct CardRow: Equatable, Identifiable {
         var key: String
@@ -129,6 +135,10 @@ struct CardInfo: Equatable {
         rows = r
         let v = src["voice_url"]?.stringValue
         voiceURL = (v?.isEmpty ?? true) ? nil : v
+        nextPlace = src["next_place"].flatMap { NavPlace(json: $0) }
+        taxi = src["taxi"].flatMap { TaxiLink(json: $0) }
+        let leg = src["leg_id"]?.stringValue ?? src["leg"]?.stringValue
+        legID = (leg?.isEmpty ?? true) ? nil : leg
     }
 
     static func decode(_ data: Data) throws -> CardInfo {
@@ -205,6 +215,7 @@ enum WSEvent: Equatable {
     case alert(level: String, textVoice: String, audioURL: String?)
     case card(CardInfo)
     case deck(count: Int)
+    case script(id: String, stepIdx: Int?, action: String?)
     case unknown(String)
 
     static func parse(_ data: Data) -> WSEvent? {
@@ -229,6 +240,9 @@ enum WSEvent: Equatable {
             return nil
         case "deck":
             return .deck(count: json["items"]?.arrayValue?.count ?? 0)
+        case "script":
+            guard let sid = json["script_id"]?.stringValue else { return nil }
+            return .script(id: sid, stepIdx: json["step_idx"]?.intValue, action: json["action"]?.stringValue)
         default:
             return .unknown(type)
         }
@@ -286,5 +300,146 @@ enum Endpoint {
         guard let u = url(base: base, path: path), var comps = URLComponents(url: u, resolvingAgainstBaseURL: false) else { return nil }
         if comps.scheme == "https" { comps.scheme = "wss" } else { comps.scheme = "ws" }
         return comps.url
+    }
+}
+
+// MARK: - API v1.1
+
+/// 徒歩経路の目的地（card.next_place）。
+struct NavPlace: Equatable {
+    var id: String
+    var name: String
+    var lat: Double
+    var lon: Double
+    var radiusM: Double?
+
+    init(id: String, name: String, lat: Double, lon: Double, radiusM: Double? = nil) {
+        self.id = id
+        self.name = name
+        self.lat = lat
+        self.lon = lon
+        self.radiusM = radiusM
+    }
+
+    init?(json: JSONValue) {
+        guard json.objectValue != nil, let lat = json["lat"]?.doubleValue, let lon = json["lon"]?.doubleValue else { return nil }
+        self.lat = lat
+        self.lon = lon
+        id = json["id"]?.stringValue ?? (String(lat) + "," + String(lon))
+        name = json["name"]?.stringValue ?? "目的地"
+        radiusM = json["radius_m"]?.doubleValue
+    }
+
+    var coord: Coord { return Coord(lat, lon) }
+}
+
+struct TaxiLink: Equatable {
+    var label: String
+    var url: String
+
+    init?(json: JSONValue) {
+        guard let u = json["url"]?.stringValue, !u.isEmpty else { return nil }
+        url = u
+        label = json["label"]?.stringValue ?? "タクシー"
+    }
+}
+
+/// GET /v1/fences の 1 件。
+struct FenceInfo: Equatable, Identifiable {
+    var id: String
+    var lat: Double
+    var lon: Double
+    var radiusM: Double
+    var say: String?
+    var scriptID: String?
+    var markArrivedLeg: String?
+    var sayAudio: String?
+
+    var coord: Coord { return Coord(lat, lon) }
+
+    init?(json: JSONValue) {
+        guard let id = json["id"]?.stringValue, let lat = json["lat"]?.doubleValue, let lon = json["lon"]?.doubleValue else { return nil }
+        self.id = id
+        self.lat = lat
+        self.lon = lon
+        radiusM = json["radius_m"]?.doubleValue ?? 30
+        let enter = json["on_enter"]
+        say = enter?["say"]?.stringValue
+        scriptID = enter?["script_id"]?.stringValue
+        markArrivedLeg = enter?["mark_arrived_leg"]?.stringValue
+        let a = json["say_audio"]?.stringValue
+        sayAudio = (a?.isEmpty ?? true) ? nil : a
+    }
+
+    static func decodeList(_ data: Data) throws -> [FenceInfo] {
+        let json = try JSONValue.parse(data)
+        let arr = json["fences"]?.arrayValue ?? json.arrayValue ?? []
+        return Array(arr.compactMap { FenceInfo(json: $0) }.prefix(20))
+    }
+}
+
+/// GET /v1/script/{id}
+struct ScriptInfo: Equatable {
+    struct Step: Equatable, Identifiable {
+        var idx: Int
+        var text: String
+        var audioURL: String?
+        var fenceID: String?
+        var landmark: String?
+        var id: Int { return idx }
+    }
+
+    var id: String
+    var title: String
+    var steps: [Step]
+
+    static func decode(_ data: Data) throws -> ScriptInfo {
+        let json = try JSONValue.parse(data)
+        guard json.objectValue != nil, let id = json["id"]?.stringValue else { throw ModelError.missingField("id") }
+        let arr = json["steps"]?.arrayValue ?? []
+        var steps: [Step] = []
+        for (i, v) in arr.enumerated() {
+            let a = v["audio_url"]?.stringValue
+            steps.append(Step(idx: v["idx"]?.intValue ?? i,
+                              text: v["text"]?.stringValue ?? "",
+                              audioURL: (a?.isEmpty ?? true) ? nil : a,
+                              fenceID: v["fence_id"]?.stringValue,
+                              landmark: v["landmark"]?.stringValue))
+        }
+        steps.sort { $0.idx < $1.idx }
+        return ScriptInfo(id: id, title: json["title"]?.stringValue ?? id, steps: steps)
+    }
+}
+
+/// POST /v1/route の返り。
+struct RouteAudio: Equatable {
+    struct Step: Equatable {
+        var idx: Int
+        var textApproach: String?
+        var audioApproach: String?
+        var textAt: String?
+        var audioAt: String?
+    }
+
+    var routeID: String
+    var steps: [Int: Step]
+    var offrouteAudio: String?
+    var arrivedAudio: String?
+
+    static func decode(_ data: Data) throws -> RouteAudio {
+        let json = try JSONValue.parse(data)
+        guard json.objectValue != nil else { throw ModelError.notObject }
+        func s(_ v: JSONValue?) -> String? {
+            let x = v?.stringValue
+            return (x?.isEmpty ?? true) ? nil : x
+        }
+        var map: [Int: Step] = [:]
+        for v in json["steps"]?.arrayValue ?? [] {
+            guard let idx = v["idx"]?.intValue else { continue }
+            map[idx] = Step(idx: idx, textApproach: s(v["text_approach"]), audioApproach: s(v["audio_approach"]),
+                            textAt: s(v["text_at"]), audioAt: s(v["audio_at"]))
+        }
+        return RouteAudio(routeID: json["route_id"]?.stringValue ?? "", steps: map,
+                          offrouteAudio: s(json["offroute_audio"]), arrivedAudio: s(json["arrived_audio"]))
     }
 }

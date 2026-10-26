@@ -4,6 +4,8 @@ import UIKit
 
 struct NavView: View {
     @EnvironmentObject var model: AppModel
+    @EnvironmentObject var nav: NavEngine
+    @EnvironmentObject var script: ScriptPlayer
     @State private var inputText = ""
     @State private var pressing = false
     @State private var showCamera = false
@@ -26,6 +28,7 @@ struct NavView: View {
                     VStack(alignment: .leading, spacing: 12) {
                         statusGrid
                         cardBox
+                        walkBox
                         if !model.lastReply.isEmpty {
                             GroupBox("最後の返事") {
                                 Text(model.lastReply)
@@ -136,6 +139,49 @@ struct NavView: View {
         }
     }
 
+    // MARK: 徒歩ナビ（WP-2n）
+
+    private var walkBox: some View {
+        GroupBox {
+            VStack(alignment: .leading, spacing: 8) {
+                Text(nav.statusText)
+                    .font(.subheadline)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                if let i = nav.currentStepIdx, let st = nav.steps.first(where: { $0.idx == i }) {
+                    Text("次: " + st.instruction)
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                }
+                HStack(spacing: 8) {
+                    Button(nav.active ? "再探索" : "案内開始") { model.guideButton() }
+                        .buttonStyle(.borderedProminent)
+                    if let taxi = model.card?.taxi {
+                        Button(taxi.label) { model.openURL(taxi.url) }
+                            .buttonStyle(.bordered)
+                    }
+                    Spacer(minLength: 0)
+                    if model.deck != nil {
+                        Button("デッキ") { model.activeSheet = .deck }
+                            .buttonStyle(.bordered)
+                    }
+                    if script.info != nil {
+                        Button("台本") { model.activeSheet = .script }
+                            .buttonStyle(.bordered)
+                    }
+                }
+                .font(.subheadline)
+            }
+        } label: {
+            HStack {
+                Text("徒歩ナビ")
+                Spacer()
+                Text(model.navActive ? "ナビ中" : "停止中")
+                    .font(.caption)
+                    .foregroundStyle(model.navActive ? zundaGreen : Color.secondary)
+            }
+        }
+    }
+
     // MARK: 操作
 
     private var controls: some View {
@@ -172,9 +218,9 @@ struct NavView: View {
                 }
             }
             HStack(spacing: 8) {
-                Button("ナビ開始") { model.askText("ナビを開始して", mode: "voice") }
+                Button("ナビ開始") { model.startNavButton() }
                     .frame(maxWidth: .infinity)
-                Button("ナビ終了") { model.askText("ナビを終了して", mode: "voice") }
+                Button("ナビ終了") { model.stopNavButton() }
                     .frame(maxWidth: .infinity)
                 Button("静かに(10分)") { model.quiet(minutes: 10) }
                     .frame(maxWidth: .infinity)
