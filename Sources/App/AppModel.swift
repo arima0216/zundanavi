@@ -13,7 +13,6 @@ final class AppModel: ObservableObject {
     static let fillerNames = ["thinking", "offline", "heard"]
     static let sampleRate = 16000
     static let loudThreshold: Float = 0.012
-    static let silenceToEnd: TimeInterval = 1.2
     static let tapThreshold: TimeInterval = 0.35
 
     enum ListenState {
@@ -55,6 +54,9 @@ final class AppModel: ObservableObject {
     @Published private(set) var wakeActive = false
     @Published private(set) var testResult = ""
     @Published private(set) var isToggleRecording = false
+    /// WP-2o: 入力レベル（RMS）の見える化。10 回/秒まで
+    @Published private(set) var inputLevel: Float = 0
+    private var levelPublishedAt = Date.distantPast
 
     private var fillers: [String: Data] = [:]
     private var cancellables = Set<AnyCancellable>()
@@ -414,6 +416,11 @@ final class AppModel: ObservableObject {
     }
 
     private func levelUpdated(_ level: Float) {
+        let t = Date()
+        if t.timeIntervalSince(levelPublishedAt) >= 0.1 {
+            levelPublishedAt = t
+            inputLevel = level
+        }
         if level >= AppModel.loudThreshold {
             lastLoudAt = Date()
             if listenState == .recording { speechSeenInRecording = true }
@@ -441,7 +448,7 @@ final class AppModel: ObservableObject {
             let elapsed = now.timeIntervalSince(recordStartedAt)
             if recMode == .toggle {
                 let silentFor = now.timeIntervalSince(max(lastLoudAt, recordStartedAt))
-                if speechSeenInRecording && silentFor >= AppModel.silenceToEnd {
+                if Endpointing.tapShouldEnd(speechSeen: speechSeenInRecording, silentFor: silentFor, endSilence: settings.endSilenceSec) {
                     finishRecording()
                 } else if !speechSeenInRecording && elapsed > 6 {
                     cancelRecording()
@@ -456,7 +463,7 @@ final class AppModel: ObservableObject {
             let elapsed = now.timeIntervalSince(wakeStartedAt)
             let partialIdle = now.timeIntervalSince(wakeLastPartialAt)
             let silentFor = now.timeIntervalSince(max(lastLoudAt, wakeStartedAt))
-            let quiet = partialIdle >= AppModel.silenceToEnd || silentFor >= AppModel.silenceToEnd
+            let quiet = Endpointing.wakeQuiet(silentFor: silentFor, partialIdle: partialIdle, endSilence: settings.endSilenceSec)
             if wakeAfterText.isEmpty {
                 // ウェイク語だけでまだ本文が無い: 少し長めに待つ
                 if (elapsed >= 4.0 && quiet) || elapsed > 8 {

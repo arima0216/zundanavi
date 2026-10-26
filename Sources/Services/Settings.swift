@@ -87,6 +87,11 @@ final class AppSettings: ObservableObject {
         didSet { ud.set(localTTSFallback, forKey: "localTTSFallback") }
     }
 
+    /// WP-2o: 話し終わりの間（秒）。tap と wake の自動終了に使う
+    @Published var endSilenceSec: Double {
+        didSet { ud.set(endSilenceSec, forKey: "endSilenceSec") }
+    }
+
     init() {
         let d = UserDefaults.standard
         serverURL = d.string(forKey: "serverURL") ?? AppSettings.defaultServerURL
@@ -98,6 +103,7 @@ final class AppSettings: ObservableObject {
         walkVoiceEnabled = d.object(forKey: "walkVoiceEnabled") as? Bool ?? true
         autoReroute = d.object(forKey: "autoReroute") as? Bool ?? true
         localTTSFallback = d.object(forKey: "localTTSFallback") as? Bool ?? true
+        endSilenceSec = Endpointing.normalize(d.object(forKey: "endSilenceSec") as? Double ?? Endpointing.defaultEndSilence)
     }
 
     var appVersion: String {

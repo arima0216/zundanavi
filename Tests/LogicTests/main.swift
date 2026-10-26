@@ -319,5 +319,10 @@ do {
     check(false, "v1.1 models threw \(error)")
 }
 
+// ===== WP-2o: endpointing =====
+check(!Endpointing.tapShouldEnd(speechSeen: true, silentFor: 1.9, endSilence: 2.0), "tap: 1.9s silence does not end")
+check(Endpointing.tapShouldEnd(speechSeen: true, silentFor: 2.0, endSilence: 2.0), "tap: 2.0s silence ends")
+check(!Endpointing.wakeQuiet(silentFor: 0.3, partialIdle: 5.0, endSilence: 2.0), "wake: partialIdle alone does not end")
+
 print("logic tests: \(passes) passed, \(failures) failed")
 if failures > 0 { exit(1) }

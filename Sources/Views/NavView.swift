@@ -187,7 +187,15 @@ struct NavView: View {
     private var controls: some View {
         VStack(spacing: 12) {
             HStack(alignment: .center, spacing: 12) {
-                bigButton
+                VStack(spacing: 4) {
+                    bigButton
+                    Text("押しっぱなしで話す／短く押すと自動で終わる")
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                        .multilineTextAlignment(.center)
+                        .frame(width: 130)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
                 VStack(spacing: 8) {
                     TextField("文字で聞く", text: $inputText)
                         .textFieldStyle(.roundedBorder)
