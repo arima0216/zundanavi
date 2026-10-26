@@ -6,6 +6,8 @@ struct NavView: View {
     @EnvironmentObject var model: AppModel
     @EnvironmentObject var nav: NavEngine
     @EnvironmentObject var script: ScriptPlayer
+    @EnvironmentObject var settings: AppSettings
+    @EnvironmentObject var history: HistoryStore
     @State private var inputText = ""
     @State private var pressing = false
     @State private var showCamera = false
@@ -197,47 +199,57 @@ struct NavView: View {
     // MARK: 操作
 
     private var controls: some View {
-        VStack(spacing: 12) {
-            HStack(alignment: .center, spacing: 12) {
-                VStack(spacing: 4) {
-                    bigButton
-                    Text("押しっぱなしで話す／短く押すと自動で終わる")
-                        .font(.caption2)
-                        .foregroundStyle(.secondary)
-                        .multilineTextAlignment(.center)
-                        .frame(width: 130)
-                        .fixedSize(horizontal: false, vertical: true)
-                }
-                VStack(spacing: 8) {
-                    TextField("文字で聞く", text: $inputText)
-                        .focused($inputFocused)
-                        .textFieldStyle(.roundedBorder)
-                        .submitLabel(.send)
-                        .onSubmit { sendText() }
-                    HStack(spacing: 8) {
-                        Button("送信") { sendText() }
-                            .buttonStyle(.borderedProminent)
-                            .disabled(inputText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
-                        Spacer(minLength: 0)
-                        Button {
-                            if UIImagePickerController.isSourceTypeAvailable(.camera) {
-                                showCamera = true
-                            } else {
-                                model.showToast("カメラが使えないのだ")
-                            }
-                        } label: {
-                            Image(systemName: "camera.fill")
-                                .font(.title3)
+        VStack(alignment: .leading, spacing: 10) {
+            chipRow
+            HStack(alignment: .bottom, spacing: 8) {
+                TextField("文字で聞く", text: $inputText, axis: .vertical)
+                    .lineLimit(1...3)
+                    .focused($inputFocused)
+                    .textFieldStyle(.roundedBorder)
+                    .submitLabel(.send)
+                    .onSubmit { sendText() }
+                    .onChange(of: inputText) { _, v in
+                        // 縦伸びの入力欄はリターンで改行が入るので、それを送信の合図にする
+                        if v.contains("\n") {
+                            inputText = v.replacingOccurrences(of: "\n", with: "")
+                            sendText()
                         }
-                        .accessibilityLabel("写真を撮って送る")
-                        PhotosPicker(selection: $photoItem, matching: .images) {
-                            Image(systemName: "photo.on.rectangle")
-                                .font(.title3)
-                        }
-                        .accessibilityLabel("写真を選んで送る")
                     }
+                Button {
+                    sendText()
+                } label: {
+                    Image(systemName: "arrow.up.circle.fill")
+                        .font(.system(size: 34))
                 }
+                .disabled(inputText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                .accessibilityLabel("送信")
+                micButton
             }
+            HStack(spacing: 12) {
+                fableChip
+                Spacer(minLength: 0)
+                Button {
+                    if UIImagePickerController.isSourceTypeAvailable(.camera) {
+                        showCamera = true
+                    } else {
+                        model.showToast("カメラが使えないのだ")
+                    }
+                } label: {
+                    Image(systemName: "camera.fill")
+                        .font(.title3)
+                }
+                .accessibilityLabel("写真を撮って送る")
+                PhotosPicker(selection: $photoItem, matching: .images) {
+                    Image(systemName: "photo.on.rectangle")
+                        .font(.title3)
+                }
+                .accessibilityLabel("写真を選んで送る")
+            }
+            Text(settings.askFable
+                 ? "Fable に聞く: 返事まで 1 分ほどかかるのだ"
+                 : "マイク: 押しっぱなしで話す／短く押すと自動で終わる")
+                .font(.caption2)
+                .foregroundStyle(.secondary)
             HStack(spacing: 8) {
                 Button("ナビ開始") { model.startNavButton() }
                     .frame(maxWidth: .infinity)
@@ -251,23 +263,63 @@ struct NavView: View {
         }
     }
 
-    private var bigButton: some View {
+    /// 定型チップ＋送信履歴チップ（横スクロール）
+    private var chipRow: some View {
+        let recent = TextFirst.recentSends(history.entries.filter { $0.role == "user" }.map { $0.text })
+        return ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: 6) {
+                ForEach(TextFirst.presets, id: \.self) { p in
+                    sendChip(p, filled: true) { sendNow(p, viaFable: false) }
+                }
+                ForEach(recent, id: \.self) { r in
+                    sendChip(TextFirst.short(r), filled: false) { sendNow(r, viaFable: settings.askFable) }
+                }
+            }
+            .padding(.vertical, 2)
+        }
+    }
+
+    private func sendChip(_ title: String, filled: Bool, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Text(title)
+                .font(.subheadline)
+                .lineLimit(1)
+                .padding(.horizontal, 12)
+                .padding(.vertical, 6)
+                .background(Capsule().fill(filled ? zundaGreen.opacity(0.18) : Color.secondary.opacity(0.12)))
+                .overlay(Capsule().stroke(filled ? zundaGreen.opacity(0.5) : Color.secondary.opacity(0.3), lineWidth: 1))
+        }
+        .buttonStyle(.plain)
+    }
+
+    /// 「Fable に聞く」切り替え（既定 OFF、保存）
+    private var fableChip: some View {
+        Button {
+            settings.askFable.toggle()
+        } label: {
+            Label("Fable に聞く", systemImage: settings.askFable ? "checkmark.circle.fill" : "circle")
+                .font(.subheadline)
+                .padding(.horizontal, 10)
+                .padding(.vertical, 6)
+                .background(Capsule().fill(settings.askFable ? Color.purple.opacity(0.2) : Color.secondary.opacity(0.12)))
+        }
+        .buttonStyle(.plain)
+        .accessibilityValue(settings.askFable ? "オン" : "オフ")
+    }
+
+    /// 入力欄の右の小さなマイク（押しっぱなし／短押しの挙動は従来どおり）
+    private var micButton: some View {
         let active = model.isRecordingAny
         return ZStack {
             Circle()
                 .fill(active ? Color.red : zundaGreen)
-                .shadow(radius: active ? 8 : 3)
-            VStack(spacing: 4) {
-                Image(systemName: active ? "waveform" : "mic.fill")
-                    .font(.system(size: 40, weight: .bold))
-                Text(model.pttLabel)
-                    .font(.caption.bold())
-                    .multilineTextAlignment(.center)
-            }
-            .foregroundColor(.white)
+                .shadow(radius: active ? 6 : 2)
+            Image(systemName: active ? "waveform" : "mic.fill")
+                .font(.system(size: 22, weight: .bold))
+                .foregroundColor(.white)
         }
-        .frame(width: 130, height: 130)
-        .scaleEffect(pressing ? 0.94 : 1.0)
+        .frame(width: 52, height: 52)
+        .scaleEffect(pressing ? 0.92 : 1.0)
         .contentShape(Circle())
         .gesture(
             DragGesture(minimumDistance: 0)
@@ -282,7 +334,7 @@ struct NavView: View {
                     model.pttUp()
                 }
         )
-        .accessibilityLabel("押して話す")
+        .accessibilityLabel(model.pttLabel)
     }
 
     @ViewBuilder
@@ -307,7 +359,13 @@ struct NavView: View {
         let t = inputText.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !t.isEmpty else { return }
         inputText = ""
-        model.askText(t, mode: "text")
+        model.askText(TextFirst.applyFable(t, on: settings.askFable), mode: "text")
+    }
+
+    /// チップ: 即送信（定型は呼びかけを付けない＝すぐ返る方）
+    private func sendNow(_ t: String, viaFable: Bool) {
+        inputFocused = false
+        model.askText(TextFirst.applyFable(t, on: viaFable), mode: "text")
     }
 
     /// 入力欄の文字を写真のメモとして使う

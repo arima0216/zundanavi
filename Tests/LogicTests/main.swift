@@ -324,5 +324,21 @@ check(!Endpointing.tapShouldEnd(speechSeen: true, silentFor: 1.9, endSilence: 2.
 check(Endpointing.tapShouldEnd(speechSeen: true, silentFor: 2.0, endSilence: 2.0), "tap: 2.0s silence ends")
 check(!Endpointing.wakeQuiet(silentFor: 0.3, partialIdle: 5.0, endSilence: 2.0), "wake: partialIdle alone does not end")
 
+// ===== WP-2p: card formatting / text-first =====
+do {
+    let c = try CardInfo.decode(data("{\"next_deadline\":{\"id\":\"d1\",\"label\":\"ファミマ集合（テスト）\",\"time\":\"17:30\",\"remaining_min\":57,\"place_id\":\"p1\"}}"))
+    check(c.rows.first?.value == "17:30 ファミマ集合（テスト）・あと 57 分", "card next_deadline formatted")
+    let c2 = try CardInfo.decode(data("{\"departure_advice\":{\"leave_at\":\"17:10\",\"reason\":\"信号が多いのだ\"}}"))
+    check(c2.rows.first?.value == "17:10 に出発。信号が多いのだ", "card departure_advice without eta")
+    let c3 = try CardInfo.decode(data("{\"how_to_go\":{\"mode\":\"walk\",\"min\":4}}"))
+    let v3 = c3.rows.first?.value ?? ""
+    check(v3 == "min: 4 / mode: walk" && !v3.contains("{") && !v3.contains("\""), "card unknown object is not JSON")
+} catch {
+    check(false, "WP-2p card threw \(error)")
+}
+check(TextFirst.applyFable("今どこ", on: true) == "ふぇーぶる、今どこ" && TextFirst.applyFable("ふぇーぶる、x", on: true) == "ふぇーぶる、x", "fable prefix once")
+check(TextFirst.recentSends(["a", "今どこ", "ふぇーぶる、b", "a", "[写真] x", "c"]) == ["c", "a", "b"], "recent sends dedupe")
+check(TextFirst.short("あいうえおかきくけこさしすせそ") == "あいうえおかきくけこさし…", "chip short 12")
+
 print("logic tests: \(passes) passed, \(failures) failed")
 if failures > 0 { exit(1) }

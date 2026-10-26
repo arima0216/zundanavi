@@ -128,7 +128,7 @@ struct CardInfo: Equatable {
         updated = src["updated"]?.displayText
         var r: [CardRow] = []
         for f in CardInfo.fieldLabels {
-            if let v = src[f.key]?.displayText, !v.isEmpty {
+            if let v = src[f.key].flatMap({ CardInfo.format(key: f.key, $0) }), !v.isEmpty {
                 r.append(CardRow(key: f.key, label: f.label, value: v))
             }
         }
@@ -143,6 +143,62 @@ struct CardInfo: Equatable {
 
     static func decode(_ data: Data) throws -> CardInfo {
         return try CardInfo(json: JSONValue.parse(data))
+    }
+
+    /// v1.1: next_deadline / departure_advice はオブジェクトで来るので文にする
+    static func format(key: String, _ v: JSONValue) -> String? {
+        guard v.objectValue != nil else { return v.displayText }
+        switch key {
+        case "next_deadline": return formatDeadline(v) ?? v.displayText
+        case "departure_advice": return formatDeparture(v) ?? v.displayText
+        default: return v.displayText
+        }
+    }
+
+    /// {id, label, time, remaining_min, place_id} -> "17:30 ファミマ集合・あと 57 分"
+    static func formatDeadline(_ v: JSONValue) -> String? {
+        let time = v["time"].flatMap { clockText($0) } ?? ""
+        let label = v["label"]?.stringValue ?? ""
+        var s = [time, label].filter { !$0.isEmpty }.joined(separator: " ")
+        if s.isEmpty { return nil }
+        if let r = v["remaining_min"]?.doubleValue {
+            if r < 0 {
+                s += "・過ぎている"
+            } else {
+                s += "・あと " + String(Int(r.rounded())) + " 分"
+            }
+        }
+        return s
+    }
+
+    /// {leave_at, reason, eta_min} -> "17:10 に出発（徒歩 4 分）。<reason>"
+    static func formatDeparture(_ v: JSONValue) -> String? {
+        guard let leave = v["leave_at"].flatMap({ clockText($0) }), !leave.isEmpty else {
+            let r = v["reason"]?.stringValue ?? ""
+            return r.isEmpty ? nil : r
+        }
+        var s = leave + " に出発"
+        if let eta = v["eta_min"]?.doubleValue {
+            s += "（徒歩 " + String(Int(eta.rounded())) + " 分）"
+        }
+        s += "。"
+        let reason = (v["reason"]?.stringValue ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+        s += reason
+        return s
+    }
+
+    /// "17:30" はそのまま、ISO8601 やエポック秒は端末時刻の HH:mm
+    static func clockText(_ v: JSONValue) -> String? {
+        if case .string(let s) = v {
+            let t = s.trimmingCharacters(in: .whitespaces)
+            if t.count <= 5, t.contains(":") { return t }
+        }
+        guard let d = TimeParse.date(from: v) else { return v.stringValue }
+        let f = DateFormatter()
+        f.locale = Locale(identifier: "en_US_POSIX")
+        f.timeZone = TimeZone.current
+        f.dateFormat = "H:mm"
+        return f.string(from: d)
     }
 
     var isEmpty: Bool { return rows.isEmpty }

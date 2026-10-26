@@ -92,11 +92,18 @@ final class AppSettings: ObservableObject {
         didSet { ud.set(endSilenceSec, forKey: "endSilenceSec") }
     }
 
+    /// WP-2p: 送信文の先頭に「ふぇーぶる、」を付けて Fable に聞く
+    @Published var askFable: Bool {
+        didSet { ud.set(askFable, forKey: "askFable") }
+    }
+
     init() {
         let d = UserDefaults.standard
         serverURL = d.string(forKey: "serverURL") ?? AppSettings.defaultServerURL
         token = Keychain.get("token") ?? ""
-        wakeWordEnabled = d.object(forKey: "wakeWordEnabled") as? Bool ?? true
+        // WP-2p: 文字ファースト。未設定なら常時傍受は OFF（保存値は尊重）
+        wakeWordEnabled = d.object(forKey: "wakeWordEnabled") as? Bool ?? false
+        askFable = d.object(forKey: "askFable") as? Bool ?? false
         micSource = MicSource(rawValue: d.string(forKey: "micSource") ?? "") ?? .earphone
         gpsSendEnabled = d.object(forKey: "gpsSendEnabled") as? Bool ?? true
         batteryLogEnabled = d.object(forKey: "batteryLogEnabled") as? Bool ?? false

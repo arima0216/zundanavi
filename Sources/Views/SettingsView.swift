@@ -57,6 +57,9 @@ struct SettingsView: View {
                     Text("経路: " + model.routeText)
                         .font(.footnote)
                         .foregroundStyle(.secondary)
+                    Text("ウェイクワードは常にマイクを聞くので電池を使う。基本は文字入力で、声は長押しで。")
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
                 }
 
                 Section("徒歩ナビ") {

@@ -101,12 +101,29 @@ enum JSONValue: Codable, Equatable {
         case .array(let a):
             let parts = a.compactMap { $0.displayText }
             return parts.isEmpty ? nil : parts.joined(separator: " / ")
-        case .object:
-            if let data = try? JSONEncoder().encode(self), let s = String(data: data, encoding: .utf8) {
-                return s
+        case .object(let o):
+            // JSON 文字列にはしない。キー順で "key: value / key: value"
+            var parts: [String] = []
+            for k in o.keys.sorted() {
+                guard let v = o[k], let s = v.flatText, !s.isEmpty else { continue }
+                parts.append(k + ": " + s)
             }
-            return nil
+            return parts.isEmpty ? nil : parts.joined(separator: " / ")
         }
+    }
+
+    /// 入れ子 1 段用: 値・配列は displayText、オブジェクトは "k=v, k=v"
+    private var flatText: String? {
+        if case .object(let o) = self {
+            var parts: [String] = []
+            for k in o.keys.sorted() {
+                if let s = o[k]?.stringValue ?? o[k]?.arrayValue.map({ $0.compactMap { $0.stringValue }.joined(separator: ",") }), !s.isEmpty {
+                    parts.append(k + "=" + s)
+                }
+            }
+            return parts.isEmpty ? nil : parts.joined(separator: ", ")
+        }
+        return displayText
     }
 
     static func formatNumber(_ d: Double) -> String {
