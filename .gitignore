@@ -1,11 +1,11 @@
 *.xcodeproj/
 Generated/
-build/
+/build/
 Payload/
 *.ipa
 .DS_Store
-logictests
-build.log
+/logictests
+/build.log
 .env
 *.local.*
 __pycache__/
