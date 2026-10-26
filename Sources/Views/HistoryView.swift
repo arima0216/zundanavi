@@ -51,6 +51,7 @@ struct HistoryView: View {
         case "user": return "もも"
         case "assistant": return "ずんだもん"
         case "push": return "お知らせ"
+        case "job": return "ロングラン"
         default: return role
         }
     }
@@ -59,7 +60,7 @@ struct HistoryView: View {
         switch role {
         case "user": return .blue
         case "assistant": return Color(red: 0.30, green: 0.69, blue: 0.31)
-        case "push": return .orange
+        case "push", "job": return .orange
         default: return .gray
         }
     }
@@ -67,6 +68,11 @@ struct HistoryView: View {
     private func row(_ e: HistoryEntry) -> some View {
         VStack(alignment: .leading, spacing: 4) {
             HStack(spacing: 6) {
+                if e.role == "job" {
+                    Image(systemName: "hammer")
+                        .font(.caption)
+                        .foregroundColor(roleColor(e.role))
+                }
                 Text(roleLabel(e.role))
                     .font(.caption.bold())
                     .foregroundColor(roleColor(e.role))

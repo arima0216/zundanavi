@@ -48,6 +48,8 @@ final class AppModel: ObservableObject {
     @Published var card: CardInfo?
     /// 返事エリア（考え中・返事・失敗）。履歴は HistoryStore 側に残る
     @Published private(set) var reply = ReplyPane()
+    /// WP-2r: ロングラン作業のバナー
+    @Published private(set) var job: JobStatus?
     var lastReply: String { return reply.text }
     /// WP-2q: 直前に送った文（返事の上に吹き出しで出す）
     @Published private(set) var lastAsked = ""
@@ -650,6 +652,9 @@ final class AppModel: ObservableObject {
         if spokenReplies.count > 50 { spokenReplies = [requestID: played] }
 
         reply.replied(r.textFull)
+        if let j = JobStatus.fromAsk(r, now: Date()), job?.id != j.id {
+            job = j
+        }
         history.add(HistoryEntry(role: "assistant", text: r.textFull, audioURL: r.audioURL))
         let url = r.audioURL
         let recent = url.map { recentlyPlayed($0) } ?? false
@@ -821,9 +826,57 @@ final class AppModel: ObservableObject {
             }
         case .script(let id, let stepIdx, let action):
             scriptEvent(id: id, stepIdx: stepIdx, action: action)
+        case .job(let ev):
+            jobEvent(ev)
         case .unknown(let t):
             AppModel.log.info("unknown ws event \(t, privacy: .public)")
         }
+    }
+
+    // MARK: - ロングラン作業（WP-2r）
+
+    private func jobEvent(_ ev: JobEvent) {
+        let r = JobStatus.reduce(job, ev, now: Date())
+        job = r.job
+        guard r.accepted else {
+            AppModel.log.info("job event ignored state=\(ev.state, privacy: .public)")
+            return
+        }
+        switch ev.state {
+        case "done":
+            let full = ev.textFull ?? ev.text
+            reply.replied(full)
+            if !full.isEmpty { history.add(HistoryEntry(role: "job", text: full, audioURL: ev.audioURL)) }
+        default:
+            if !ev.text.isEmpty { history.add(HistoryEntry(role: "job", text: ev.text, audioURL: ev.audioURL)) }
+        }
+        // started の声は HTTP 応答で鳴るので WS 側では鳴らさない
+        if ev.state != "started", let u = ev.audioURL, !recentlyPlayed(u) {
+            markPlayed(u)
+            let item = speech.enqueueSpeak(seq: Int.max)
+            fetchAudio(u, into: item)
+        }
+    }
+
+    func cancelJob() {
+        guard let j = job, j.isActive else { return }
+        let api = self.api
+        let jid = j.id
+        Task {
+            do {
+                try await api.cancelJob(id: jid)
+                if var cur = job, cur.id == jid {
+                    _ = cur.apply(JobEvent(jobID: jid, state: "cancelled", text: "ロングラン作業をやめたのだ。"), now: Date())
+                    job = cur
+                }
+            } catch {
+                showToast("やめられなかったのだ")
+            }
+        }
+    }
+
+    func dismissJob() {
+        if let j = job, !j.isActive { job = nil }
     }
 
     // MARK: - 音声セッションの復旧（片耳の入れ替え・割り込み）

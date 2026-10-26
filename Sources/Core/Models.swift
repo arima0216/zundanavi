@@ -58,6 +58,8 @@ struct AskResponse: Equatable {
     var tier: String?
     /// WP-2p: WS speak で先に流した文の数（>0 なら HTTP の audio は鳴らさない）
     var streamed: Int = 0
+    /// WP-2r: tier "job" の時の job_id
+    var jobID: String?
 
     init(id: String, transcript: String?, textFull: String, textVoice: String, audioURL: String?, elapsedMs: Double?, tier: String?) {
         self.id = id
@@ -83,6 +85,8 @@ struct AskResponse: Equatable {
         elapsedMs = json["elapsed_ms"]?.doubleValue
         tier = json["tier"]?.stringValue
         streamed = json["streamed"]?.intValue ?? 0
+        let jid = json["job_id"]?.stringValue
+        jobID = (jid?.isEmpty ?? true) ? nil : jid
     }
 
     static func decode(_ data: Data) throws -> AskResponse {
@@ -275,6 +279,7 @@ enum WSEvent: Equatable {
     case card(CardInfo)
     case deck(count: Int)
     case script(id: String, stepIdx: Int?, action: String?)
+    case job(JobEvent)
     case unknown(String)
 
     static func parse(_ data: Data) -> WSEvent? {
@@ -302,9 +307,56 @@ enum WSEvent: Equatable {
         case "script":
             guard let sid = json["script_id"]?.stringValue else { return nil }
             return .script(id: sid, stepIdx: json["step_idx"]?.intValue, action: json["action"]?.stringValue)
+        case "job":
+            if let ev = JobEvent.parse(json: json) { return WSEvent.job(ev) }
+            return nil
         default:
             return .unknown(type)
         }
+    }
+}
+
+/// WP-2r: WS {"type":"job", job_id, state: started|progress|done|failed|cancelled, ...}
+struct JobEvent: Equatable {
+    var jobID: String
+    var state: String
+    var title: String?
+    var text: String
+    var textFull: String?
+    var audioURL: String?
+    var n: Int?
+    var elapsedSec: Double?
+    var started: Double?
+
+    init(jobID: String, state: String, title: String? = nil, text: String = "", textFull: String? = nil,
+         audioURL: String? = nil, n: Int? = nil, elapsedSec: Double? = nil, started: Double? = nil) {
+        self.jobID = jobID
+        self.state = state
+        self.title = title
+        self.text = text
+        self.textFull = textFull
+        self.audioURL = audioURL
+        self.n = n
+        self.elapsedSec = elapsedSec
+        self.started = started
+    }
+
+    static func parse(json: JSONValue) -> JobEvent? {
+        guard json["type"]?.stringValue == "job" else { return nil }
+        guard let jid = json["job_id"]?.stringValue, !jid.isEmpty else { return nil }
+        func opt(_ k: String) -> String? {
+            let v = json[k]?.stringValue
+            return (v?.isEmpty ?? true) ? nil : v
+        }
+        return JobEvent(jobID: jid,
+                        state: json["state"]?.stringValue ?? "",
+                        title: opt("title"),
+                        text: json["text"]?.stringValue ?? "",
+                        textFull: opt("text_full"),
+                        audioURL: opt("audio_url"),
+                        n: json["n"]?.intValue,
+                        elapsedSec: json["elapsed_sec"]?.doubleValue,
+                        started: json["started"]?.doubleValue)
     }
 }
 

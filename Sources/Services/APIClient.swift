@@ -167,6 +167,12 @@ struct APIClient {
         do { return try ScriptInfo.decode(data) } catch { throw APIError.decode }
     }
 
+    /// WP-2r: ロングラン作業をやめる
+    func cancelJob(id: String) async throws {
+        let enc = id.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? id
+        _ = try await postJSON("/v1/job/" + enc + "/cancel", [:])
+    }
+
     func scriptStep(id: String, action: String) async throws {
         let enc = id.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? id
         _ = try await postJSON("/v1/script/" + enc + "/step", ["action": action])

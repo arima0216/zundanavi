@@ -371,5 +371,45 @@ do {
     if case .failed(let m) = r.phase { check(m.contains("時間切れ"), "reply pane timeout message") } else { check(false, "reply pane failed phase") }
 }
 
+// ===== WP-2r: JobStatusTests =====
+do {
+    let t0 = Date(timeIntervalSince1970: 1_761_470_000)
+    var j = JobStatus(id: "j1", title: "", startedAt: t0)
+    check(j.apply(JobEvent(jobID: "j1", state: "started", title: "博多の夜の計画", text: "ロングラン作業に入るのだ。", started: 1_761_470_000), now: t0), "job started accepted")
+    check(j.apply(JobEvent(jobID: "j1", state: "progress", text: "予定表を読んでいるのだ", n: 1), now: t0.addingTimeInterval(20)), "job progress 1")
+    check(j.apply(JobEvent(jobID: "j1", state: "progress", text: "店を3つに絞ったのだ", n: 2), now: t0.addingTimeInterval(60)), "job progress 2")
+    check(j.isActive && j.latestText == "店を3つに絞ったのだ" && j.lines.count == 3 && j.title == "博多の夜の計画", "job running latestText")
+    check(j.apply(JobEvent(jobID: "j1", state: "done", text: "終わったのだ。", textFull: "全文", elapsedSec: 214), now: t0.addingTimeInterval(214)), "job done accepted")
+    check(j.state == .done && !j.isActive && j.result == "全文" && j.latestText == "終わったのだ。", "job done state/result")
+    check(j.elapsedText(now: t0.addingTimeInterval(9999)) == "3 分 34 秒", "job done clock stops")
+    // 終了後の progress は無視
+    check(!j.apply(JobEvent(jobID: "j1", state: "progress", text: "遅れて来た"), now: t0.addingTimeInterval(300)) && j.latestText == "終わったのだ。", "job ignores progress after done")
+}
+do {
+    let t0 = Date(timeIntervalSince1970: 1_000)
+    var j = JobStatus(id: "j1", title: "a", startedAt: t0)
+    check(!j.apply(JobEvent(jobID: "other", state: "progress", text: "x"), now: t0) && j.lines.isEmpty, "job ignores other id")
+    let r1 = JobStatus.reduce(j, JobEvent(jobID: "other", state: "progress", text: "x"), now: t0)
+    check(!r1.accepted && r1.job?.id == "j1", "job reduce keeps running job against other id")
+    _ = j.apply(JobEvent(jobID: "j1", state: "cancelled", text: "やめたのだ"), now: t0)
+    let r2 = JobStatus.reduce(j, JobEvent(jobID: "j2", state: "started", title: "次", text: "入るのだ"), now: t0)
+    check(r2.accepted && r2.job?.id == "j2" && r2.job?.isActive == true, "job reduce new started replaces finished")
+}
+do {
+    let r = try AskResponse.decode(data("{\"id\":\"c1\",\"text_full\":\"x\",\"text_voice\":\"ロングラン作業に入るのだ。「博多の夜」を考えるのだ。\",\"audio_url\":\"/v1/audio/c1\",\"tier\":\"job\",\"job_id\":\"J9\"}"))
+    let j = JobStatus.fromAsk(r, now: Date(timeIntervalSince1970: 0))
+    check(j?.id == "J9" && j?.title == "博多の夜" && j?.isActive == true, "job fromAsk")
+    let r2 = try AskResponse.decode(data("{\"id\":\"c2\",\"text_full\":\"x\",\"tier\":\"deep\"}"))
+    check(JobStatus.fromAsk(r2, now: Date()) == nil, "job fromAsk non-job is nil")
+} catch {
+    check(false, "job fromAsk threw \(error)")
+}
+check(JobStatus.durationText(48) == "48 秒" && JobStatus.durationText(192) == "3 分 12 秒", "job elapsedText")
+do {
+    let ev = WSEvent.parse(data("{\"type\":\"job\",\"job_id\":\"J1\",\"state\":\"progress\",\"n\":2,\"text\":\"今こんな状況なのだ。\",\"audio_url\":\"/v1/audio/p2\"}"))
+    check(ev == .job(JobEvent(jobID: "J1", state: "progress", text: "今こんな状況なのだ。", audioURL: "/v1/audio/p2", n: 2)), "ws job parse")
+    check(WSEvent.parse(data("{\"type\":\"job\",\"state\":\"progress\",\"text\":\"x\"}")) == nil, "ws job without job_id is nil")
+}
+
 print("logic tests: \(passes) passed, \(failures) failed")
 if failures > 0 { exit(1) }

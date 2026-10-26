@@ -13,6 +13,7 @@ struct NavView: View {
     @State private var showCamera = false
     @State private var photoItem: PhotosPickerItem?
     @FocusState private var inputFocused: Bool
+    @State private var showJobLines = false
 
     private let zundaGreen = Color(red: 0.30, green: 0.69, blue: 0.31)
 
@@ -44,6 +45,7 @@ struct NavView: View {
                                     .textSelection(.enabled)
                             }
                         }
+                        jobBanner
                         replyBox
                     }
                     .padding(16)
@@ -257,6 +259,98 @@ struct NavView: View {
             .font(.subheadline)
             }
         }
+    }
+
+    /// WP-2r: ロングラン作業のバナー（返事欄の上）
+    @ViewBuilder
+    private var jobBanner: some View {
+        if let j = model.job {
+            GroupBox {
+                VStack(alignment: .leading, spacing: 6) {
+                    switch j.state {
+                    case .running:
+                        HStack(spacing: 8) {
+                            ProgressView()
+                            Text("ロングラン作業中")
+                                .font(.subheadline.bold())
+                            Spacer()
+                            TimelineView(.periodic(from: .now, by: 1)) { ctx in
+                                Text(j.elapsedText(now: ctx.date))
+                                    .font(.caption.monospacedDigit())
+                                    .foregroundStyle(.secondary)
+                            }
+                        }
+                        if !j.title.isEmpty {
+                            Text(j.title)
+                                .font(.headline)
+                                .lineLimit(1)
+                        }
+                        if !j.latestText.isEmpty {
+                            Text(j.latestText)
+                                .font(.subheadline)
+                                .fixedSize(horizontal: false, vertical: true)
+                        }
+                        HStack(spacing: 8) {
+                            Button("やめる") { model.cancelJob() }
+                                .buttonStyle(.bordered)
+                                .tint(.orange)
+                            Button(showJobLines ? "経過を閉じる" : "経過") { showJobLines.toggle() }
+                                .buttonStyle(.bordered)
+                            Spacer()
+                        }
+                        .font(.subheadline)
+                        if showJobLines {
+                            VStack(alignment: .leading, spacing: 2) {
+                                ForEach(Array(j.lines.enumerated()), id: \.offset) { _, line in
+                                    Text("・" + line)
+                                        .font(.caption)
+                                        .foregroundStyle(.secondary)
+                                        .fixedSize(horizontal: false, vertical: true)
+                                }
+                            }
+                        }
+                    case .done:
+                        HStack(spacing: 8) {
+                            Image(systemName: "checkmark.circle.fill")
+                                .foregroundColor(zundaGreen)
+                            Text("終わったのだ（" + j.elapsedText(now: Date()) + "）")
+                                .font(.subheadline.bold())
+                            Spacer()
+                            jobCloseButton
+                        }
+                        if !j.title.isEmpty {
+                            Text(j.title)
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                                .lineLimit(1)
+                        }
+                    case .failed, .cancelled:
+                        HStack(alignment: .top, spacing: 8) {
+                            Image(systemName: "exclamationmark.triangle.fill")
+                                .foregroundColor(.orange)
+                            Text(j.latestText.isEmpty ? (j.state == .failed ? "ロングラン作業が失敗したのだ。" : "ロングラン作業をやめたのだ。") : j.latestText)
+                                .font(.subheadline)
+                                .fixedSize(horizontal: false, vertical: true)
+                            Spacer()
+                            jobCloseButton
+                        }
+                    }
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+            }
+        }
+    }
+
+    private var jobCloseButton: some View {
+        Button {
+            model.dismissJob()
+        } label: {
+            Image(systemName: "xmark")
+                .font(.subheadline.bold())
+                .foregroundStyle(.secondary)
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel("閉じる")
     }
 
     /// 返事エリア: 考え中（薄く）→ 返事（全文折り返し）／失敗
