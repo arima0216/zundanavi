@@ -15,7 +15,7 @@ targets:
       path: Generated/Info.plist
       properties:
         CFBundleDisplayName: ずんだナビ
-        CFBundleShortVersionString: "0.2.0"
+        CFBundleShortVersionString: "0.2.1"
         CFBundleVersion: "2"
         UILaunchScreen: {}
         UISupportedInterfaceOrientations:
@@ -32,12 +32,11 @@ targets:
         NSLocalNetworkUsageDescription: 同じネットワーク内のサーバーにつなぐために使います。
         NSAppTransportSecurity:
           NSAllowsArbitraryLoads: true
-          NSAllowsLocalNetworking: true
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: dev.momo.zundanavi
-        MARKETING_VERSION: "0.2.0"
-        CURRENT_PROJECT_VERSION: "2"
+        MARKETING_VERSION: "0.2.1"
+        CURRENT_PROJECT_VERSION: "3"
         TARGETED_DEVICE_FAMILY: "1"
         SWIFT_VERSION: "5.0"
         GENERATE_INFOPLIST_FILE: "NO"
