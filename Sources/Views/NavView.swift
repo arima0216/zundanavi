@@ -10,6 +10,7 @@ struct NavView: View {
     @State private var pressing = false
     @State private var showCamera = false
     @State private var photoItem: PhotosPickerItem?
+    @FocusState private var inputFocused: Bool
 
     private let zundaGreen = Color(red: 0.30, green: 0.69, blue: 0.31)
 
@@ -38,7 +39,12 @@ struct NavView: View {
                         }
                     }
                     .padding(16)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .contentShape(Rectangle())
+                    // 背景タップでキーボードを閉じる（ボタンのタップは食わない）
+                    .simultaneousGesture(TapGesture().onEnded { inputFocused = false })
                 }
+                .scrollDismissesKeyboard(.interactively)
                 Divider()
                 controls
                     .padding(16)
@@ -46,6 +52,12 @@ struct NavView: View {
             .navigationTitle("ずんだもん案内")
             .navigationBarTitleDisplayMode(.inline)
             .overlay(alignment: .top) { toastView }
+            .toolbar {
+                ToolbarItemGroup(placement: .keyboard) {
+                    Spacer()
+                    Button("閉じる") { inputFocused = false }
+                }
+            }
             .sheet(isPresented: $showCamera) {
                 ImagePicker(sourceType: .camera) { img in
                     model.sendPhoto(img, note: takeNote())
@@ -198,6 +210,7 @@ struct NavView: View {
                 }
                 VStack(spacing: 8) {
                     TextField("文字で聞く", text: $inputText)
+                        .focused($inputFocused)
                         .textFieldStyle(.roundedBorder)
                         .submitLabel(.send)
                         .onSubmit { sendText() }
@@ -290,6 +303,7 @@ struct NavView: View {
     // MARK: 動作
 
     private func sendText() {
+        defer { inputFocused = false }
         let t = inputText.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !t.isEmpty else { return }
         inputText = ""
@@ -298,6 +312,7 @@ struct NavView: View {
 
     /// 入力欄の文字を写真のメモとして使う
     private func takeNote() -> String? {
+        defer { inputFocused = false }
         let t = inputText.trimmingCharacters(in: .whitespacesAndNewlines)
         inputText = ""
         return t.isEmpty ? nil : t
