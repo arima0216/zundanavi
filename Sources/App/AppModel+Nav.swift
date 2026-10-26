@@ -197,18 +197,11 @@ extension AppModel {
     // MARK: 音声
 
     func markPlayed(_ url: String) {
-        recentAudio[url] = Date()
-        if recentAudio.count > 200 {
-            let now = Date()
-            recentAudio = recentAudio.filter { now.timeIntervalSince($0.value) < AppModel.suppressSeconds }
-        }
+        recentAudio.mark(url, now: Date().timeIntervalSince1970)
     }
 
     func recentlyPlayed(_ url: String) -> Bool {
-        if let t = recentAudio[url], Date().timeIntervalSince(t) < AppModel.suppressSeconds {
-            return true
-        }
-        return false
+        return recentAudio.recently(url, now: Date().timeIntervalSince1970)
     }
 
     /// 徒歩ナビの声（既存キューに alert 相当で割り込み）

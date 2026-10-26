@@ -56,6 +56,8 @@ struct AskResponse: Equatable {
     var audioURL: String?
     var elapsedMs: Double?
     var tier: String?
+    /// WP-2p: WS speak で先に流した文の数（>0 なら HTTP の audio は鳴らさない）
+    var streamed: Int = 0
 
     init(id: String, transcript: String?, textFull: String, textVoice: String, audioURL: String?, elapsedMs: Double?, tier: String?) {
         self.id = id
@@ -80,6 +82,7 @@ struct AskResponse: Equatable {
         audioURL = (a?.isEmpty ?? true) ? nil : a
         elapsedMs = json["elapsed_ms"]?.doubleValue
         tier = json["tier"]?.stringValue
+        streamed = json["streamed"]?.intValue ?? 0
     }
 
     static func decode(_ data: Data) throws -> AskResponse {

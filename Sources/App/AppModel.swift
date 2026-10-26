@@ -38,7 +38,7 @@ final class AppModel: ObservableObject {
     @Published var navActive = false
     var lastLegID: String?
     /// 最近ローカルで鳴らした音声 URL（サーバー push との二重再生を防ぐ）
-    var recentAudio: [String: Date] = [:]
+    var recentAudio = PlayedURLs(window: 180)
 
     @Published private(set) var listenState: ListenState = .idle
     @Published private(set) var busyCount = 0
@@ -640,10 +640,15 @@ final class AppModel: ObservableObject {
 
         lastReply = r.textFull
         history.add(HistoryEntry(role: "assistant", text: r.textFull, audioURL: r.audioURL))
-        if let url = r.audioURL {
+        let url = r.audioURL
+        let recent = url.map { recentlyPlayed($0) } ?? false
+        if ReplyAudio.shouldPlayHTTP(streamed: r.streamed, url: url, recentlyPlayed: recent), let u = url {
+            markPlayed(u)
             let item = speech.enqueueAnswer()
-            fetchAudio(url, into: item)
+            fetchAudio(u, into: item)
         } else {
+            // WS speak で流し済み（streamed>0）か同じ URL を鳴らした後
+            if url != nil { AppModel.log.info("http audio skipped streamed=\(r.streamed) recent=\(recent)") }
             speech.cancelFillers()
         }
     }
@@ -773,6 +778,7 @@ final class AppModel: ObservableObject {
                 history.add(HistoryEntry(role: "push", text: text, audioURL: url))
             }
             if let u = url, !recentlyPlayed(u) {
+                markPlayed(u)
                 let item = speech.enqueueSpeak(seq: seq)
                 fetchAudio(u, into: item)
             }

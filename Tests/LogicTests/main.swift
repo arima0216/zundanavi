@@ -340,5 +340,21 @@ check(TextFirst.applyFable("今どこ", on: true) == "ふぇーぶる、今ど�
 check(TextFirst.recentSends(["a", "今どこ", "ふぇーぶる、b", "a", "[写真] x", "c"]) == ["c", "a", "b"], "recent sends dedupe")
 check(TextFirst.short("あいうえおかきくけこさしすせそ") == "あいうえおかきくけこさし…", "chip short 12")
 
+// ===== WP-2p 2b: no double reply audio =====
+do {
+    let r = try AskResponse.decode(data("{\"id\":\"a1\",\"text_full\":\"x\",\"text_voice\":\"x\",\"audio_url\":\"/v1/audio/a1\",\"streamed\":3}"))
+    check(r.streamed == 3 && !ReplyAudio.shouldPlayHTTP(streamed: r.streamed, url: r.audioURL, recentlyPlayed: false), "streamed>0 skips http audio")
+    let r0 = try AskResponse.decode(data("{\"id\":\"a2\",\"text_full\":\"x\",\"audio_url\":\"/v1/audio/a2\"}"))
+    check(r0.streamed == 0 && ReplyAudio.shouldPlayHTTP(streamed: 0, url: r0.audioURL, recentlyPlayed: false), "no streamed plays http audio")
+} catch {
+    check(false, "WP-2p 2b threw \(error)")
+}
+do {
+    var p = PlayedURLs(window: 180)
+    check(p.claim("/v1/audio/b1", now: 100), "same url first play")
+    check(!p.claim("/v1/audio/b1", now: 101) && !ReplyAudio.shouldPlayHTTP(streamed: 0, url: "/v1/audio/b1", recentlyPlayed: p.recently("/v1/audio/b1", now: 102)), "same url not played twice")
+    check(p.claim("/v1/audio/b1", now: 400), "same url ok after window")
+}
+
 print("logic tests: \(passes) passed, \(failures) failed")
 if failures > 0 { exit(1) }
