@@ -15,8 +15,8 @@ targets:
       path: Generated/Info.plist
       properties:
         CFBundleDisplayName: ずんだナビ
-        CFBundleShortVersionString: "0.2.10"
-        CFBundleVersion: "12"
+        CFBundleShortVersionString: "0.2.11"
+        CFBundleVersion: "13"
         UILaunchScreen: {}
         UISupportedInterfaceOrientations:
           - UIInterfaceOrientationPortrait
@@ -35,8 +35,8 @@ targets:
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: dev.momo.zundanavi
-        MARKETING_VERSION: "0.2.10"
-        CURRENT_PROJECT_VERSION: "12"
+        MARKETING_VERSION: "0.2.11"
+        CURRENT_PROJECT_VERSION: "13"
         TARGETED_DEVICE_FAMILY: "1"
         SWIFT_VERSION: "5.0"
         GENERATE_INFOPLIST_FILE: "NO"

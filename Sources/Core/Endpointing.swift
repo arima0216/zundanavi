@@ -64,7 +64,7 @@ enum Endpointing {
     }
 
     /// ウェイク語の後ろの本文が、まだ言い終わっていなさそうか。
-    /// (a) 3 文字以下 (b) フィラーだけ (c) 末尾が助詞・接続・読点 なら true
+    /// (a) 2 文字以下 (b) フィラーだけ (c) 末尾が助詞・接続・読点 なら true
     static func wakeTextLooksUnfinished(_ text: String) -> Bool {
         var chars = compact(text)
         var ended = false
@@ -74,7 +74,8 @@ enum Endpointing {
         }
         if !ended, let l = chars.last, l == "、" || l == "," { return true }
         let body = chars.filter { !WakeWord.punct.contains($0) }
-        if body.count <= 3 { return true }
+        // v0.2.11: 3 文字（「今どこ」「教えて」）は言い切りが多いので 2 文字以下だけ
+        if body.count <= 2 { return true }
         let s = String(body)
         if isFillerOnly(s) { return true }
         if ended { return false }

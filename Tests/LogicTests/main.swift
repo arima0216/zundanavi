@@ -421,8 +421,14 @@ check(!Endpointing.wakeTextLooksUnfinished("乗車して席座りました"), "f
 check(Endpointing.wakeTextLooksUnfinished("えーと、あのー、うーん"), "unfinished: filler combo")
 check(!Endpointing.wakeTextLooksUnfinished("ベンチがあればそれでいいのだけど"), "finished: tail けど (v0.2.10)")
 check(!Endpointing.wakeTextLooksUnfinished("逐一案内して"), "finished: request tail して (v0.2.10)")
-// 「教えて」は 3 文字なので規則 (a) で true のまま（3 文字以下の規則は維持）
-check(Endpointing.wakeTextLooksUnfinished("教えて"), "unfinished: 教えて is 3 chars (rule a)")
+// v0.2.11: 規則 (a) は 2 文字以下
+check(!Endpointing.wakeTextLooksUnfinished("教えて"), "finished: 教えて (v0.2.11)")
+check(!Endpointing.wakeTextLooksUnfinished("今どこ"), "finished: 今どこ (v0.2.11)")
+// 「何階」は 2 文字なので規則 (a) で延長対象（「何時」と同じ）
+check(Endpointing.wakeTextLooksUnfinished("何階") && !Endpointing.wakeTextLooksUnfinished("どこだ"), "何階 2 chars waits, どこだ finished")
+check(Endpointing.wakeTextLooksUnfinished("何時"), "unfinished: 何時 2 chars (v0.2.11)")
+check(Endpointing.wakeTextLooksUnfinished("あ") && Endpointing.wakeTextLooksUnfinished("え") && Endpointing.wakeTextLooksUnfinished("ん"), "unfinished: single fillers")
+check(Endpointing.wakeShouldSend(text: "今どこ", elapsed: 3.0, silentFor: 2.1, partialIdle: 2.1, endSilence: 2.0), "wake send: 今どこ uses 1.5s rule")
 check(!Endpointing.wakeTextLooksUnfinished("調べてほしい"), "finished: 調べてほしい")
 check(!Endpointing.wakeTextLooksUnfinished("なんで案内してくれないの"), "finished: question tail の (v0.2.10)")
 check(!Endpointing.wakeTextLooksUnfinished("勉強会は何時から"), "finished: tail から (v0.2.10)")
@@ -435,7 +441,7 @@ check(Endpointing.wakeShouldSend(text: "逐一案内して", elapsed: 3.0, silen
 check(Endpointing.wakeTextLooksUnfinished("次の電車の時刻、"), "unfinished: tail 、")
 check(!Endpointing.wakeTextLooksUnfinished("次の電車は何時に来る"), "finished: plain question")
 check(!Endpointing.wakeTextLooksUnfinished("明日の天気を教えて？"), "finished: question mark ends")
-check(Endpointing.wakeTextLooksUnfinished("ＡＢＣ"), "unfinished: 3 chars fullwidth")
+check(!Endpointing.wakeTextLooksUnfinished("ＡＢＣ") && Endpointing.wakeTextLooksUnfinished("ＡＢ"), "fullwidth: 3 chars finished, 2 chars unfinished (v0.2.11)")
 check(Endpointing.isFillerOnly("あ") && Endpointing.isFillerOnly("いや") && Endpointing.isFillerOnly("えーっと、その"), "filler only")
 check(!Endpointing.isFillerOnly("今どこ") && !Endpointing.isFillerOnly("") && !Endpointing.isFillerOnly("あした"), "not filler only")
 check(!Endpointing.wakeShouldSend(text: "あ", elapsed: 3.0, silentFor: 2.5, partialIdle: 2.5, endSilence: 2.0), "wake send: あ waits past 2s silence")
