@@ -17,11 +17,19 @@ final class SpeechQueue: NSObject, ObservableObject, AVAudioPlayerDelegate {
         let seq: Int
         var data: Data?
         var failed = false
+        /// WP-7: この時刻までに鳴り始めなければ捨てる（サーバー主導の案内）
+        var expiresAt: Date?
 
-        init(kind: Kind, seq: Int = 0, data: Data? = nil) {
+        init(kind: Kind, seq: Int = 0, data: Data? = nil, expiresAt: Date? = nil) {
             self.kind = kind
             self.seq = seq
             self.data = data
+            self.expiresAt = expiresAt
+        }
+
+        func isExpired(_ now: Date) -> Bool {
+            guard let e = expiresAt else { return false }
+            return now >= e
         }
     }
 
@@ -67,8 +75,8 @@ final class SpeechQueue: NSObject, ObservableObject, AVAudioPlayerDelegate {
 
     /// WS の speak。seq 順に並べる。
     @discardableResult
-    func enqueueSpeak(seq: Int) -> Item {
-        let it = Item(kind: .speak, seq: seq)
+    func enqueueSpeak(seq: Int, expiresAt: Date? = nil) -> Item {
+        let it = Item(kind: .speak, seq: seq, expiresAt: expiresAt)
         items.removeAll { $0.kind == .filler }
         if let c = current, c.kind == .filler { stopCurrent() }
         if let idx = items.firstIndex(where: { $0.kind == .speak && $0.seq > seq }) {
@@ -128,7 +136,11 @@ final class SpeechQueue: NSObject, ObservableObject, AVAudioPlayerDelegate {
 
     private func pump() {
         guard current == nil else { return }
-        while let head = items.first, head.failed {
+        let now = Date()
+        while let head = items.first, head.failed || head.isExpired(now) {
+            if !head.failed {
+                SpeechQueue.log.info("expired speak item dropped seq=\(head.seq)")
+            }
             items.removeFirst()
         }
         guard let head = items.first, let data = head.data else {

@@ -411,5 +411,35 @@ do {
     check(WSEvent.parse(data("{\"type\":\"job\",\"state\":\"progress\",\"text\":\"x\"}")) == nil, "ws job without job_id is nil")
 }
 
+// ===== WP-7: 聞き取り切れ対策 =====
+check(Endpointing.wakeTextLooksUnfinished("あ"), "unfinished: あ")
+check(Endpointing.wakeTextLooksUnfinished("いや"), "unfinished: いや")
+check(Endpointing.wakeTextLooksUnfinished("えっと"), "unfinished: えっと")
+check(!Endpointing.wakeTextLooksUnfinished("10時19分に出るって何が"), "finished: 10時19分に出るって何が (question tail)")
+check(Endpointing.wakeTextLooksUnfinished("福岡に着いてからの"), "unfinished: tail の")
+check(!Endpointing.wakeTextLooksUnfinished("乗車して席座りました"), "finished: 乗車して席座りました")
+check(Endpointing.wakeTextLooksUnfinished("えーと、あのー、うーん"), "unfinished: filler combo")
+check(Endpointing.wakeTextLooksUnfinished("博多駅まで行きたいけど"), "unfinished: tail けど")
+check(Endpointing.wakeTextLooksUnfinished("次の電車の時刻、"), "unfinished: tail 、")
+check(!Endpointing.wakeTextLooksUnfinished("次の電車は何時に来る"), "finished: plain question")
+check(!Endpointing.wakeTextLooksUnfinished("明日の天気を教えて？"), "finished: question mark ends")
+check(Endpointing.wakeTextLooksUnfinished("ＡＢＣ"), "unfinished: 3 chars fullwidth")
+check(Endpointing.isFillerOnly("あ") && Endpointing.isFillerOnly("いや") && Endpointing.isFillerOnly("えーっと、その"), "filler only")
+check(!Endpointing.isFillerOnly("今どこ") && !Endpointing.isFillerOnly("") && !Endpointing.isFillerOnly("あした"), "not filler only")
+check(!Endpointing.wakeShouldSend(text: "あ", elapsed: 3.0, silentFor: 2.5, partialIdle: 2.5, endSilence: 2.0), "wake send: あ waits past 2s silence")
+check(Endpointing.wakeShouldSend(text: "あ", elapsed: 4.0, silentFor: 3.6, partialIdle: 3.6, endSilence: 2.0), "wake send: あ after 3.5s silence")
+check(Endpointing.wakeShouldSend(text: "乗車して席座りました", elapsed: 3.0, silentFor: 2.1, partialIdle: 2.1, endSilence: 2.0), "wake send: finished text uses 1.5s rule")
+check(Endpointing.wakeShouldSend(text: "あ", elapsed: 10.5, silentFor: 0.2, partialIdle: 4.0, endSilence: 2.0), "wake send: unfinished cap 10s when recognizer idle")
+check(!Endpointing.wakeShouldSend(text: "福岡に着いてからの", elapsed: 12.0, silentFor: 0.2, partialIdle: 1.0, endSilence: 2.0), "wake send: no cut while still speaking")
+check(Endpointing.wakeShouldSend(text: "", elapsed: 8.5, silentFor: 0.0, partialIdle: 0.0, endSilence: 2.0), "wake send: empty text 8s cap")
+
+// ===== WP-7: guide speak / stop =====
+do {
+    let g = WSEvent.parse(data("{\"type\":\"speak\",\"seq\":5,\"audio_url\":\"/v1/audio/g5\",\"text\":\"次は右なのだ\",\"kind\":\"guide\",\"ttl_sec\":30}"))
+    check(g == .speak(seq: 5, audioURL: "/v1/audio/g5", text: "次は右なのだ", kind: "guide", ttlSec: 30), "ws speak guide kind/ttl")
+    check(WSEvent.parse(data("{\"type\":\"stop\"}")) == .stop, "ws stop")
+    check(WSEvent.parse(data("{\"type\":\"state\",\"x\":1}")) == .unknown("state"), "ws state is unknown")
+}
+
 print("logic tests: \(passes) passed, \(failures) failed")
 if failures > 0 { exit(1) }

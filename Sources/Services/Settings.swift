@@ -97,6 +97,11 @@ final class AppSettings: ObservableObject {
         didSet { ud.set(askFable, forKey: "askFable") }
     }
 
+    /// WP-7: 読み上げ中に他アプリの音を下げる（既定 false = 混ぜる）
+    @Published var duckOthers: Bool {
+        didSet { ud.set(duckOthers, forKey: "duckOthers") }
+    }
+
     init() {
         let d = UserDefaults.standard
         serverURL = d.string(forKey: "serverURL") ?? AppSettings.defaultServerURL
@@ -111,6 +116,7 @@ final class AppSettings: ObservableObject {
         autoReroute = d.object(forKey: "autoReroute") as? Bool ?? true
         localTTSFallback = d.object(forKey: "localTTSFallback") as? Bool ?? true
         endSilenceSec = Endpointing.normalize(d.object(forKey: "endSilenceSec") as? Double ?? Endpointing.defaultEndSilence)
+        duckOthers = d.object(forKey: "duckOthers") as? Bool ?? false
     }
 
     var appVersion: String {

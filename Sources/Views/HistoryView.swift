@@ -52,6 +52,7 @@ struct HistoryView: View {
         case "assistant": return "ずんだもん"
         case "push": return "お知らせ"
         case "job": return "ロングラン"
+        case "guide": return "案内"
         default: return role
         }
     }
@@ -60,7 +61,7 @@ struct HistoryView: View {
         switch role {
         case "user": return .blue
         case "assistant": return Color(red: 0.30, green: 0.69, blue: 0.31)
-        case "push", "job": return .orange
+        case "push", "job", "guide": return .orange
         default: return .gray
         }
     }

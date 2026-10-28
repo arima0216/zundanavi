@@ -89,6 +89,8 @@ extension AppModel {
         fenceTracker.setFences([])
         location.monitor(fences: [])
         lastLegID = nil
+        // WP-7: 次のカードでまた先読みする
+        fencesDate = nil
     }
 
     /// ナビ画面の「案内開始」: 今の next_place へ探索し直す
@@ -115,6 +117,8 @@ extension AppModel {
         let oldPlace = card?.nextPlace
         let oldLeg = card?.legID
         card = c
+        // WP-7: 起動時・card 受信時に、日付が変わっていればジオフェンスを先読み
+        prefetchFencesIfNeeded()
         guard navActive else { return }
         if let p = c?.nextPlace, p != oldPlace {
             startWalkIfPossible(force: false)
@@ -134,11 +138,25 @@ extension AppModel {
 
     // MARK: ジオフェンス
 
-    func loadFences() async {
+    /// WP-7: navActive でなくても読む。日付が変わった時だけ（読み込み中は重ねない）
+    func prefetchFencesIfNeeded() {
+        guard !fencesLoading, fencesDate != AppModel.fenceDay(Date()) else { return }
+        fencesLoading = true
+        Task {
+            await loadFences()
+            fencesLoading = false
+        }
+    }
+
+    static func fenceDay(_ d: Date) -> String {
         let f = DateFormatter()
         f.locale = Locale(identifier: "en_US_POSIX")
         f.dateFormat = "yyyy-MM-dd"
-        let date = f.string(from: Date())
+        return f.string(from: d)
+    }
+
+    func loadFences() async {
+        let date = AppModel.fenceDay(Date())
         let leg = card?.legID
         lastLegID = leg
         do {
@@ -146,6 +164,7 @@ extension AppModel {
             fences = list
             fenceTracker.setFences(list.map { FenceTracker.Fence(id: $0.id, center: $0.coord, radius: $0.radiusM) })
             location.monitor(fences: list)
+            fencesDate = date
             AppModel.navLog.info("fences loaded \(list.count)")
         } catch {
             AppModel.navLog.info("fences unavailable: \(error.localizedDescription, privacy: .public)")
@@ -154,7 +173,8 @@ extension AppModel {
 
     func navLocationUpdated(_ l: CLLocation) {
         if nav.active { nav.update(l) }
-        guard navActive, !fences.isEmpty else { return }
+        // WP-7: 先読みしたフェンスは navActive でなくても判定する
+        guard !fences.isEmpty else { return }
         let ids = fenceTracker.update(Coord(l.coordinate.latitude, l.coordinate.longitude),
                                       accuracy: l.horizontalAccuracy,
                                       time: l.timestamp.timeIntervalSince1970)
@@ -162,7 +182,7 @@ extension AppModel {
     }
 
     private func regionEntered(_ id: String) {
-        guard navActive, fences.contains(where: { $0.id == id }) else { return }
+        guard fences.contains(where: { $0.id == id }) else { return }
         if fenceTracker.externalEnter(id, time: Date().timeIntervalSince1970) {
             fenceEntered(id)
         }
@@ -172,6 +192,8 @@ extension AppModel {
         guard let f = fences.first(where: { $0.id == id }) else { return }
         AppModel.navLog.info("fence enter \(id, privacy: .public)")
         postFenceEnter(id)
+        // WP-7: ナビ中でなければ送るだけ（声はサーバー主導の案内に任せる）
+        guard navActive else { return }
         if let say = f.say, !say.isEmpty { showToast(say) }
         if let a = f.sayAudio {
             markPlayed(a)

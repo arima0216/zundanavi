@@ -45,6 +45,10 @@ struct SettingsView: View {
                     .onChange(of: settings.micSource) { _, m in
                         model.setMic(m)
                     }
+                    Toggle("読み上げ中に他アプリの音を下げる", isOn: $settings.duckOthers)
+                        .onChange(of: settings.duckOthers) { _, _ in
+                            model.reconfigureSessionWhenIdle()
+                        }
                     VStack(alignment: .leading, spacing: 6) {
                         Text("話し終わりの間")
                         Picker("話し終わりの間", selection: $settings.endSilenceSec) {

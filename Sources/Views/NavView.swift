@@ -257,6 +257,16 @@ struct NavView: View {
             }
             .buttonStyle(.bordered)
             .font(.subheadline)
+            // WP-7: 自分の報告をボタン 1 つで（声で言いにくい車内・会場用）
+            HStack(spacing: 8) {
+                ForEach(["乗った", "着いた", "出た"], id: \.self) { t in
+                    Button(t) { model.sendReport(t) }
+                        .frame(maxWidth: .infinity)
+                }
+            }
+            .buttonStyle(.bordered)
+            .controlSize(.small)
+            .font(.footnote)
             }
         }
     }

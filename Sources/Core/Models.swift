@@ -274,12 +274,15 @@ enum TimeParse {
 
 /// WS /v1/events で来るイベント。
 enum WSEvent: Equatable {
-    case speak(seq: Int, audioURL: String?, text: String)
+    /// WP-7: kind "guide" はサーバー主導の案内。ttlSec を過ぎて鳴らせなければ捨てる
+    case speak(seq: Int, audioURL: String?, text: String, kind: String? = nil, ttlSec: Double? = nil)
     case alert(level: String, textVoice: String, audioURL: String?)
     case card(CardInfo)
     case deck(count: Int)
     case script(id: String, stepIdx: Int?, action: String?)
     case job(JobEvent)
+    /// WP-7: {"type":"stop"} 鳴っている案内を止める
+    case stop
     case unknown(String)
 
     static func parse(_ data: Data) -> WSEvent? {
@@ -295,7 +298,12 @@ enum WSEvent: Equatable {
         }()
         switch type {
         case "speak":
-            return .speak(seq: json["seq"]?.intValue ?? 0, audioURL: audio, text: json["text"]?.stringValue ?? "")
+            let kind: String? = {
+                let k = json["kind"]?.stringValue
+                return (k?.isEmpty ?? true) ? nil : k
+            }()
+            return .speak(seq: json["seq"]?.intValue ?? 0, audioURL: audio, text: json["text"]?.stringValue ?? "",
+                          kind: kind, ttlSec: json["ttl_sec"]?.doubleValue)
         case "alert":
             let tv = json["text_voice"]?.stringValue ?? json["text"]?.stringValue ?? ""
             return .alert(level: json["level"]?.stringValue ?? "info", textVoice: tv, audioURL: audio)
@@ -310,6 +318,8 @@ enum WSEvent: Equatable {
         case "job":
             if let ev = JobEvent.parse(json: json) { return WSEvent.job(ev) }
             return nil
+        case "stop":
+            return .stop
         default:
             return .unknown(type)
         }

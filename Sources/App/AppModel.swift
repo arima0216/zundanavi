@@ -14,6 +14,10 @@ final class AppModel: ObservableObject {
     static let sampleRate = 16000
     static let loudThreshold: Float = 0.012
     static let tapThreshold: TimeInterval = 0.35
+    /// WP-7: speak kind "guide" の ttl_sec が無い時の既定（秒）
+    static let guideDefaultTTL: TimeInterval = 20
+    /// WP-7: 報告ボタンの連打防止（秒）
+    static let reportCooldown: TimeInterval = 2
 
     enum ListenState {
         case idle, recording, wakeCapture
@@ -37,10 +41,24 @@ final class AppModel: ObservableObject {
     @Published var activeSheet: ActiveSheet?
     @Published var navActive = false
     var lastLegID: String?
+    /// WP-7: ジオフェンスを読んだ日（yyyy-MM-dd）。日付が変わったら取り直す
+    var fencesDate: String?
+    var fencesLoading = false
     /// 最近ローカルで鳴らした音声 URL（サーバー push との二重再生を防ぐ）
     var recentAudio = PlayedURLs(window: 180)
 
-    @Published private(set) var listenState: ListenState = .idle
+    @Published private(set) var listenState: ListenState = .idle {
+        didSet {
+            // WP-7: 録音中に保留した音声セッションの再設定は idle に戻った時に
+            if listenState == .idle && sessionReconfigPending {
+                Task { @MainActor [weak self] in
+                    self?.reconfigureSessionWhenIdle()
+                }
+            }
+        }
+    }
+    private var sessionReconfigPending = false
+    private var lastReportAt = Date.distantPast
     @Published private(set) var busyCount = 0
     @Published private(set) var serverOK: Bool?
     @Published private(set) var serverDetail = ""
@@ -159,7 +177,7 @@ final class AppModel: ObservableObject {
         // 権限の順: マイク → 音声認識 → 位置（WhenInUse → Always）
         let micOK = await AVAudioApplication.requestRecordPermission()
         do {
-            try AudioSessionController.configure(mic: settings.micSource)
+            try AudioSessionController.configure(mic: settings.micSource, duckOthers: settings.duckOthers)
         } catch {
             AppModel.log.error("session configure failed: \(error.localizedDescription, privacy: .public)")
         }
@@ -182,6 +200,8 @@ final class AppModel: ObservableObject {
         startTimers()
         battery.setEnabled(settings.batteryLogEnabled)
         await refreshAll(announceOffline: true)
+        // WP-7: ナビ開始を押さなくてもジオフェンスを読んで見張る
+        prefetchFencesIfNeeded()
     }
 
     func becameActive() {
@@ -469,15 +489,9 @@ final class AppModel: ObservableObject {
             let elapsed = now.timeIntervalSince(wakeStartedAt)
             let partialIdle = now.timeIntervalSince(wakeLastPartialAt)
             let silentFor = now.timeIntervalSince(max(lastLoudAt, wakeStartedAt))
-            let quiet = Endpointing.wakeQuiet(silentFor: silentFor, partialIdle: partialIdle, endSilence: settings.endSilenceSec)
-            if wakeAfterText.isEmpty {
-                // ウェイク語だけでまだ本文が無い: 少し長めに待つ
-                if (elapsed >= 4.0 && quiet) || elapsed > 8 {
-                    endWakeCapture(send: true)
-                }
-            } else if elapsed >= 1.5 && quiet {
-                endWakeCapture(send: true)
-            } else if elapsed > 30 {
+            // WP-7: 本文が空なら 4 秒/8 秒、途中っぽい間は無音 +1.5 秒・上限 10 秒、十分なら従来の 1.5 秒ルール
+            if Endpointing.wakeShouldSend(text: wakeAfterText, elapsed: elapsed, silentFor: silentFor,
+                                          partialIdle: partialIdle, endSilence: settings.endSilenceSec) {
                 endWakeCapture(send: true)
             }
         case .idle:
@@ -552,6 +566,13 @@ final class AppModel: ObservableObject {
         wake.restart()
         guard send else { return }
 
+        // WP-7: 本文が「あ」「いや」等だけならサーバーに送らない（録音も送らない）
+        if Endpointing.isFillerOnly(text) {
+            AppModel.log.info("wake text is filler only; dropped")
+            showToast("もう一度どうぞ")
+            return
+        }
+
         switch CommandRouter.route(text) {
         case .quiet(let minutes):
             quiet(minutes: minutes)
@@ -600,6 +621,17 @@ final class AppModel: ObservableObject {
         Task {
             await performAsk(text: t, wav: nil, mode: mode, requestID: rid, primary: true)
         }
+    }
+
+    /// WP-7: 報告ボタン（乗った／着いた／出た）。文字送信と同じ経路（現在地付き）、連打は 2 秒防ぐ
+    func sendReport(_ text: String) {
+        let now = Date()
+        guard now.timeIntervalSince(lastReportAt) >= AppModel.reportCooldown else {
+            AppModel.log.info("report button debounced")
+            return
+        }
+        lastReportAt = now
+        askText(text, mode: "text")
     }
 
     func quiet(minutes: Int) {
@@ -800,16 +832,27 @@ final class AppModel: ObservableObject {
 
     private func handleEvent(_ ev: WSEvent, raw: Data) {
         switch ev {
-        case .speak(let seq, let url, let text):
+        case .speak(let seq, let url, let text, let kind, let ttlSec):
+            // WP-7: サーバー主導の案内（kind "guide"）は期限つき。過ぎて鳴らせなければ捨てる
+            let isGuide = kind == "guide"
             if !text.isEmpty {
                 reply.replied(text)
-                history.add(HistoryEntry(role: "push", text: text, audioURL: url))
+                history.add(HistoryEntry(role: isGuide ? "guide" : "push", text: text, audioURL: url))
             }
             if let u = url, !recentlyPlayed(u) {
                 markPlayed(u)
-                let item = speech.enqueueSpeak(seq: seq)
+                var expires: Date? = nil
+                if isGuide {
+                    var ttl = AppModel.guideDefaultTTL
+                    if let t = ttlSec, t > 0 { ttl = t }
+                    expires = Date().addingTimeInterval(ttl)
+                }
+                let item = speech.enqueueSpeak(seq: seq, expiresAt: expires)
                 fetchAudio(u, into: item)
             }
+        case .stop:
+            speech.stopAll()
+            showToast("案内を止めたのだ")
         case .alert(let level, let textVoice, let url):
             showToast(textVoice)
             history.add(HistoryEntry(role: "push", text: "[" + level + "] " + textVoice, audioURL: url))
@@ -883,12 +926,23 @@ final class AppModel: ObservableObject {
 
     func setMic(_ m: MicSource) {
         do {
-            try AudioSessionController.configure(mic: m)
+            try AudioSessionController.configure(mic: m, duckOthers: settings.duckOthers)
         } catch {
             AppModel.log.error("mic switch failed: \(error.localizedDescription, privacy: .public)")
         }
         if micReady { capture.restart() }
         if wakeActive { wake.restart() }
+    }
+
+    /// WP-7: 「他アプリの音を下げる」の切り替え。録音中は保留して、次に idle になった時に反映する
+    func reconfigureSessionWhenIdle() {
+        guard listenState == .idle else {
+            sessionReconfigPending = true
+            return
+        }
+        sessionReconfigPending = false
+        setMic(settings.micSource)
+        AppModel.log.info("session reconfigured duckOthers=\(self.settings.duckOthers, privacy: .public)")
     }
 
     private func observeSession() {
@@ -927,7 +981,7 @@ final class AppModel: ObservableObject {
             guard let self = self else { return }
             if full {
                 do {
-                    try AudioSessionController.configure(mic: self.settings.micSource)
+                    try AudioSessionController.configure(mic: self.settings.micSource, duckOthers: self.settings.duckOthers)
                 } catch {
                     AppModel.log.error("session reactivate failed: \(error.localizedDescription, privacy: .public)")
                 }

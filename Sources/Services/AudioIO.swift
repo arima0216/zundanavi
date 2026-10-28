@@ -5,9 +5,15 @@ import os
 enum AudioSessionController {
     static let log = Logger(subsystem: "dev.momo.zundanavi", category: "session")
 
-    static func configure(mic: MicSource) throws {
+    /// WP-7: duckOthers=false（既定）なら他アプリの音を下げずに混ぜる
+    static func configure(mic: MicSource, duckOthers: Bool) throws {
         let s = AVAudioSession.sharedInstance()
-        var opts: AVAudioSession.CategoryOptions = [.allowBluetooth, .duckOthers, .defaultToSpeaker]
+        var opts: AVAudioSession.CategoryOptions = [.allowBluetooth, .defaultToSpeaker]
+        if duckOthers {
+            opts.insert(.duckOthers)
+        } else {
+            opts.insert(.mixWithOthers)
+        }
         if mic == .builtIn {
             // 本体マイクの時は出力をイヤホンの A2DP に逃がせるようにする
             opts.insert(.allowBluetoothA2DP)
