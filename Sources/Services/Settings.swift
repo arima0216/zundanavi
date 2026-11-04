@@ -71,6 +71,10 @@ final class AppSettings: ObservableObject {
     @Published var gpsSendEnabled: Bool {
         didSet { ud.set(gpsSendEnabled, forKey: "gpsSendEnabled") }
     }
+    /// WP-11i: 向き・モーション・気圧・歩数を /v1/position に添える（OFF なら従来の 6 キーだけ）
+    @Published var sensorSendEnabled: Bool {
+        didSet { ud.set(sensorSendEnabled, forKey: "sensorSendEnabled") }
+    }
     @Published var batteryLogEnabled: Bool {
         didSet { ud.set(batteryLogEnabled, forKey: "batteryLogEnabled") }
     }
@@ -111,6 +115,7 @@ final class AppSettings: ObservableObject {
         askFable = d.object(forKey: "askFable") as? Bool ?? false
         micSource = MicSource(rawValue: d.string(forKey: "micSource") ?? "") ?? .earphone
         gpsSendEnabled = d.object(forKey: "gpsSendEnabled") as? Bool ?? true
+        sensorSendEnabled = d.object(forKey: "sensorSendEnabled") as? Bool ?? true
         batteryLogEnabled = d.object(forKey: "batteryLogEnabled") as? Bool ?? false
         walkVoiceEnabled = d.object(forKey: "walkVoiceEnabled") as? Bool ?? true
         autoReroute = d.object(forKey: "autoReroute") as? Bool ?? true

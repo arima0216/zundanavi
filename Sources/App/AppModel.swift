@@ -29,6 +29,8 @@ final class AppModel: ObservableObject {
     let events = EventsClient()
     let speech = SpeechQueue()
     let battery = BatteryLogger()
+    /// WP-11i: 歩行・歩数・階・気圧（位置を送っている間だけ動かす）
+    let motion = MotionService()
     private let capture = AudioCapture()
     private let wake = WakeWordListener()
     // WP-2n: 徒歩ナビ・ジオフェンス・台本・デッキ（処理は AppModel+Nav.swift）
@@ -149,6 +151,13 @@ final class AppModel: ObservableObject {
             self?.locationUpdated(l)
             self?.navLocationUpdated(l)
         }
+        // WP-11i: MotionService は「位置更新中 かつ GPS 送信 ON かつ センサー送信 ON」の間だけ動かす
+        Publishers.CombineLatest3(location.$updating, settings.$gpsSendEnabled, settings.$sensorSendEnabled)
+            .receive(on: RunLoop.main)
+            .sink { [weak self] updating, gps, sensors in
+                self?.updateMotion(run: updating && gps && sensors)
+            }
+            .store(in: &cancellables)
         setUpNav()
         wake.onPartial = { [weak self] text in
             self?.wakePartial(text)
@@ -814,10 +823,42 @@ final class AppModel: ObservableObject {
         }
     }
 
+    private func updateMotion(run: Bool) {
+        if run {
+            UIDevice.current.isBatteryMonitoringEnabled = true
+            motion.start()
+        } else {
+            motion.stop()
+        }
+    }
+
     private func sendPosition(_ l: CLLocation) {
-        lastPositionSentAt = Date()
+        let now = Date()
+        let age = now.timeIntervalSince(l.timestamp)
+        // WP-11i: 端末側の棄却は最小限（acc<0 と、まだ送っていない 10 秒超の古い fix）。それ以外はサーバーに任せる
+        let alreadySent = lastPositionSent.map { $0.timestamp == l.timestamp } ?? false
+        switch FixGate.check(acc: l.horizontalAccuracy, ageS: age, alreadySent: alreadySent) {
+        case .send:
+            break
+        case .dropNoAccuracy:
+            lastPositionSentAt = now
+            LocationService.log.info("position dropped: acc<0")
+            return
+        case .dropStale:
+            lastPositionSentAt = now
+            LocationService.log.info("position dropped: stale fix age=\(Int(age), privacy: .public)s")
+            return
+        }
+        lastPositionSentAt = now
         lastPositionSent = l
-        let fix = LocationService.fix(from: l)
+        var fix = LocationService.fix(from: l, heading: location.lastHeading)
+        if settings.sensorSendEnabled {
+            var x = LocationService.extras(from: l, heading: location.lastHeading, now: now)
+            motion.takeSnapshot(into: &x)
+            x.appState = UIApplication.shared.applicationState == .background ? "background" : "foreground"
+            x.battery = PositionExtras.battery(level: UIDevice.current.batteryLevel)
+            fix.extras = x
+        }
         let api = self.api
         Task {
             do {

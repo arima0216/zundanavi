@@ -378,11 +378,19 @@ struct GPSFix: Equatable {
     var heading: Double?
     var speed: Double?
     var ts: Double
+    /// WP-11i: /v1/position に同梱する観測値（nil なら従来の 6 キーだけ）。
+    var extras: PositionExtras? = nil
 
     var dictionary: [String: Any] {
         var d: [String: Any] = ["lat": lat, "lon": lon, "acc": acc, "ts": ts]
         if let h = heading { d["heading"] = h } else { d["heading"] = NSNull() }
         if let v = speed { d["speed"] = v } else { d["speed"] = NSNull() }
+        if let x = extras {
+            // 既存キーは上書きしない（契約を守る）
+            for (k, v) in x.dictionary where d[k] == nil {
+                d[k] = v
+            }
+        }
         return d
     }
 

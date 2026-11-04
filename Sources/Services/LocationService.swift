@@ -8,6 +8,10 @@ final class LocationService: NSObject, ObservableObject, CLLocationManagerDelega
 
     @Published private(set) var last: CLLocation?
     @Published private(set) var status: CLAuthorizationStatus = .notDetermined
+    /// WP-11i: 位置更新を動かしているか（MotionService の開始/停止をこれに合わせる）
+    @Published private(set) var updating = false
+    /// WP-11i: 最新の CLHeading（端末の向き）。位置更新と同時なので trueHeading も有効。
+    private(set) var lastHeading: CLHeading?
 
     /// 位置が更新されるたびに呼ぶ
     var onUpdate: ((CLLocation) -> Void)?
@@ -56,22 +60,60 @@ final class LocationService: NSObject, ObservableObject, CLLocationManagerDelega
         manager.allowsBackgroundLocationUpdates = true
         manager.showsBackgroundLocationIndicator = true
         manager.startUpdatingLocation()
+        if CLLocationManager.headingAvailable() {
+            manager.headingFilter = 5
+            manager.startUpdatingHeading()
+        }
+        updating = true
     }
 
     var fix: GPSFix? {
         guard let l = last else { return nil }
-        return LocationService.fix(from: l)
+        return LocationService.fix(from: l, heading: lastHeading)
     }
 
-    static func fix(from l: CLLocation) -> GPSFix {
+    /// 既存の 6 キー。heading は HeadingPick の規則（歩行中で course が確かなら course、他は trueHeading）。
+    static func fix(from l: CLLocation, heading h: CLHeading?) -> GPSFix {
+        let speed = PositionExtras.nonNegative(l.speed)
+        let course = PositionExtras.nonNegative(l.course)
+        let courseAcc = PositionExtras.nonNegative(l.courseAccuracy)
+        let trueH = headingTrue(h)
         return GPSFix(
             lat: l.coordinate.latitude,
             lon: l.coordinate.longitude,
             acc: l.horizontalAccuracy,
-            heading: l.course >= 0 ? l.course : nil,
-            speed: l.speed >= 0 ? l.speed : nil,
+            heading: HeadingPick.pick(speed: speed, course: course, courseAcc: courseAcc, headingTrue: trueH),
+            speed: speed,
             ts: l.timestamp.timeIntervalSince1970
         )
+    }
+
+    /// headingAccuracy が負なら向きは無効。
+    private static func headingValid(_ h: CLHeading?) -> CLHeading? {
+        guard let h = h, h.headingAccuracy >= 0 else { return nil }
+        return h
+    }
+
+    private static func headingTrue(_ h: CLHeading?) -> Double? {
+        guard let h = headingValid(h) else { return nil }
+        return PositionExtras.nonNegative(h.trueHeading)
+    }
+
+    /// WP-11i: CLLocation / CLHeading 由来の追加観測値（Core Motion と端末状態は呼び出し側で足す）。
+    static func extras(from l: CLLocation, heading h: CLHeading?, now: Date) -> PositionExtras {
+        var x = PositionExtras()
+        x.course = PositionExtras.nonNegative(l.course)
+        x.courseAcc = PositionExtras.nonNegative(l.courseAccuracy)
+        x.altM = l.verticalAccuracy >= 0 ? l.altitude : nil
+        x.vertAcc = PositionExtras.nonNegative(l.verticalAccuracy)
+        x.floorLevel = l.floor?.level
+        x.fixAgeS = max(now.timeIntervalSince(l.timestamp), 0)
+        if let hv = headingValid(h) {
+            x.headingTrue = PositionExtras.nonNegative(hv.trueHeading)
+            x.headingMag = PositionExtras.nonNegative(hv.magneticHeading)
+            x.headingAcc = hv.headingAccuracy
+        }
+        return x
     }
 
     var accuracyText: String {
@@ -110,6 +152,17 @@ final class LocationService: NSObject, ObservableObject, CLLocationManagerDelega
         Task { @MainActor in
             self.handle(l)
         }
+    }
+
+    nonisolated func locationManager(_ manager: CLLocationManager, didUpdateHeading newHeading: CLHeading) {
+        Task { @MainActor in
+            self.lastHeading = newHeading
+        }
+    }
+
+    /// 案内中に方位の校正画面を出さない（調査 §2）
+    nonisolated func locationManagerShouldDisplayHeadingCalibration(_ manager: CLLocationManager) -> Bool {
+        return false
     }
 
     nonisolated func locationManager(_ manager: CLLocationManager, didFailWithError error: Error) {

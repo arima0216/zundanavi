@@ -459,5 +459,127 @@ do {
     check(WSEvent.parse(data("{\"type\":\"state\",\"x\":1}")) == .unknown("state"), "ws state is unknown")
 }
 
+// ===== WP-11i: sensors on /v1/position =====
+// HeadingPick: speed >= 0.5 かつ course_acc 0...30 なら course、他は heading_true
+check(HeadingPick.pick(speed: 1.2, course: 90, courseAcc: 10, headingTrue: 200) == 90, "heading pick: walking good course")
+check(HeadingPick.pick(speed: 0.5, course: 45, courseAcc: 30, headingTrue: 200) == 45, "heading pick: boundary 0.5 m/s and 30 deg")
+check(HeadingPick.pick(speed: 0.49, course: 45, courseAcc: 5, headingTrue: 200) == 200, "heading pick: slow uses heading_true")
+check(HeadingPick.pick(speed: 1.2, course: 45, courseAcc: 31, headingTrue: 200) == 200, "heading pick: bad course acc uses heading_true")
+check(HeadingPick.pick(speed: 1.2, course: 45, courseAcc: nil, headingTrue: 200) == 200, "heading pick: no course acc uses heading_true")
+check(HeadingPick.pick(speed: nil, course: 45, courseAcc: 5, headingTrue: nil) == nil, "heading pick: no speed no heading -> nil")
+check(HeadingPick.pick(speed: 1.2, course: nil, courseAcc: 5, headingTrue: 10) == 10, "heading pick: no course uses heading_true")
+check(HeadingPick.pick(speed: 1.2, course: -1, courseAcc: 5, headingTrue: -1) == nil, "heading pick: negatives are invalid")
+check(HeadingPick.pick(speed: 1.2, course: 0, courseAcc: 0, headingTrue: 300) == 0, "heading pick: course 0 deg is valid")
+
+// MotionPick: walking > running > cycling > automotive > stationary, 全 false は unknown
+check(MotionPick.pick(stationary: false, walking: false, running: false, automotive: false, cycling: false) == "unknown", "motion pick: all false unknown")
+check(MotionPick.pick(stationary: true, walking: false, running: false, automotive: true, cycling: false) == "automotive", "motion pick: automotive over stationary")
+check(MotionPick.pick(stationary: true, walking: true, running: true, automotive: true, cycling: true) == "walking", "motion pick: walking first")
+check(MotionPick.pick(stationary: false, walking: false, running: true, automotive: false, cycling: true) == "running", "motion pick: running over cycling")
+check(MotionPick.pick(stationary: true, walking: false, running: false, automotive: false, cycling: false) == "stationary", "motion pick: stationary only")
+
+// StepCounter: 前回 take からの差分
+do {
+    var c = StepCounter()
+    let z = c.take()
+    check(z.steps == 0 && z.distance == nil, "steps: empty take")
+    c.update(steps: 10, distance: 7.5)
+    let a = c.take()
+    check(a.steps == 10 && a.distance == 7.5, "steps: first delta")
+    c.update(steps: 25, distance: 18.0)
+    c.update(steps: 30, distance: 21.5)
+    let b = c.take()
+    check(b.steps == 20 && b.distance == 14.0, "steps: delta since last take")
+    let b2 = c.take()
+    check(b2.steps == 0 && b2.distance == 0, "steps: no movement delta 0")
+    c.update(steps: 4, distance: 3.0)
+    let r = c.take()
+    check(r.steps == 4 && r.distance == 3.0, "steps: counter restarted counts from 0")
+    c.reset()
+    check(c.steps == 0 && c.take().steps == 0, "steps: reset")
+}
+
+// FixGate: acc<0 と未送信の 10 秒超は落とす、送り直しは送る
+check(FixGate.check(acc: 8, ageS: 0.5, alreadySent: false) == .send, "gate: fresh fix")
+check(FixGate.check(acc: -1, ageS: 0.5, alreadySent: false) == .dropNoAccuracy, "gate: acc<0 dropped")
+check(FixGate.check(acc: 8, ageS: 10.5, alreadySent: false) == .dropStale, "gate: stale new fix dropped")
+check(FixGate.check(acc: 8, ageS: 10.0, alreadySent: false) == .send, "gate: 10s is not stale")
+check(FixGate.check(acc: 8, ageS: 40, alreadySent: true) == .send, "gate: resend of sent fix keeps 10s heartbeat")
+check(FixGate.check(acc: -1, ageS: 40, alreadySent: true) == .dropNoAccuracy, "gate: acc<0 dropped even on resend")
+check(FixGate.check(acc: 250, ageS: 1, alreadySent: false) == .send, "gate: large acc left to server")
+
+// PositionExtras / GPSFix JSON
+do {
+    var x = PositionExtras()
+    x.course = 91
+    x.courseAcc = 12
+    x.headingTrue = 88
+    x.headingMag = 95
+    x.headingAcc = 20
+    x.altM = 8.2
+    x.vertAcc = 3
+    x.fixAgeS = 0.4
+    x.motion = "walking"
+    x.motionConf = 2
+    x.stepsDelta = 14
+    x.distDeltaM = 10.5
+    x.floorsAsc = 0
+    x.floorsDesc = 1
+    x.pressureKPa = 101.21
+    x.relAltM = -3.4
+    x.altBaseTs = 1792999000
+    x.appState = "background"
+    x.battery = 0.82
+    let base = GPSFix(lat: 33.59, lon: 130.42, acc: 8, heading: 91, speed: 1.3, ts: 1764195840)
+    var g = base
+    g.extras = x
+    let obj = try JSONSerialization.jsonObject(with: g.jsonData()) as? [String: Any] ?? [:]
+    let baseObj = try JSONSerialization.jsonObject(with: base.jsonData()) as? [String: Any] ?? [:]
+    check(obj["lat"] as? Double == 33.59 && obj["lon"] as? Double == 130.42, "pos json: lat/lon unchanged")
+    check(obj["acc"] as? Double == 8 && obj["ts"] as? Double == 1764195840, "pos json: acc/ts unchanged")
+    check(obj["heading"] as? Double == 91 && obj["speed"] as? Double == 1.3, "pos json: heading/speed kept")
+    check(obj.count == 6 + 19, "pos json: all extra keys present (floor_level nil omitted)")
+    check(obj["floor_level"] == nil, "pos json: nil floor_level omitted")
+    check(obj["motion"] as? String == "walking" && obj["motion_conf"] as? Int == 2, "pos json: motion")
+    check(obj["steps_delta"] as? Int == 14 && obj["floors_desc"] as? Int == 1, "pos json: pedometer ints")
+    check(obj["pressure_kpa"] as? Double == 101.21 && obj["rel_alt_m"] as? Double == -3.4, "pos json: altimeter")
+    check(obj["app_state"] as? String == "background" && obj["battery"] as? Double == 0.82, "pos json: device")
+    check(obj["heading_true"] as? Double == 88 && obj["course_acc"] as? Double == 12, "pos json: heading fields")
+    check(obj["alt_base_ts"] as? Double == 1792999000 && obj["fix_age_s"] as? Double == 0.4, "pos json: timestamps")
+    check(baseObj.count == 6, "pos json: no extras -> legacy 6 keys")
+    // null は出ない（新しいキー）
+    let newKeys = obj.keys.filter { baseObj[$0] == nil }
+    check(newKeys.count == 19, "pos json: 19 new keys")
+    check(!newKeys.contains { obj[$0] is NSNull }, "pos json: no null in extra keys")
+    // 空の extras は従来と同じ
+    var e = base
+    e.extras = PositionExtras()
+    check(e.jsonString() == base.jsonString(), "pos json: empty extras same bytes")
+    // NaN/inf は落とす（本体が {} にならない）
+    var bad = PositionExtras()
+    bad.relAltM = Double.nan
+    bad.pressureKPa = Double.infinity
+    bad.motion = ""
+    bad.stepsDelta = 3
+    var gb = base
+    gb.extras = bad
+    let bObj = try JSONSerialization.jsonObject(with: gb.jsonData()) as? [String: Any] ?? [:]
+    check(bObj["lat"] as? Double == 33.59, "pos json: NaN does not break body")
+    check(bObj["rel_alt_m"] == nil && bObj["pressure_kpa"] == nil && bObj["motion"] == nil, "pos json: non-finite and empty dropped")
+    check(bObj["steps_delta"] as? Int == 3, "pos json: valid key kept beside NaN")
+    // heading が nil でも従来どおり heading:null（既存契約）、extras は既存キーを上書きしない
+    var nh = GPSFix(lat: 1, lon: 2, acc: 3, heading: nil, speed: nil, ts: 4)
+    nh.extras = x
+    let nObj = try JSONSerialization.jsonObject(with: nh.jsonData()) as? [String: Any] ?? [:]
+    check(nObj["heading"] is NSNull && nObj["speed"] is NSNull, "pos json: legacy null heading/speed kept")
+    check(nObj["lat"] as? Double == 1 && nObj["acc"] as? Double == 3 && nObj["ts"] as? Double == 4, "pos json: extras never override legacy keys")
+} catch {
+    check(false, "pos json threw \(error)")
+}
+check(PositionExtras.battery(level: -1) == nil, "battery: unknown -1 -> nil")
+check(PositionExtras.battery(level: 0.5) == 0.5, "battery: 0.5")
+check(PositionExtras.battery(level: 1.0) == 1.0, "battery: full")
+check(PositionExtras.nonNegative(-1) == nil && PositionExtras.nonNegative(0) == 0, "nonNegative")
+
 print("logic tests: \(passes) passed, \(failures) failed")
 if failures > 0 { exit(1) }

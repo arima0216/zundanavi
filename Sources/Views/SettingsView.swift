@@ -74,6 +74,7 @@ struct SettingsView: View {
 
                 Section("位置") {
                     Toggle("GPS を送る", isOn: $settings.gpsSendEnabled)
+                    Toggle("センサー送信", isOn: $settings.sensorSendEnabled)
                     Text(model.gpsText)
                         .font(.footnote)
                         .foregroundStyle(.secondary)
@@ -103,10 +104,28 @@ struct SettingsView: View {
                 } footer: {
                     Text("緑なら声として数えている（しきい値 " + String(format: "%.3f", AppModel.loudThreshold) + "、橙の線）。")
                 }
+
+                Section {
+                    SensorStatusRow(motion: model.motion)
+                }
             }
             .navigationTitle("設定")
             .navigationBarTitleDisplayMode(.inline)
         }
+    }
+}
+
+/// WP-11i: センサーの有無と現在値（実機確認用、小さく）
+struct SensorStatusRow: View {
+    @ObservedObject var motion: MotionService
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Text(motion.availabilityText)
+            Text(motion.valuesText)
+                .foregroundStyle(.secondary)
+        }
+        .font(.caption2.monospacedDigit())
     }
 }
 

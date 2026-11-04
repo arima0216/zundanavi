@@ -15,8 +15,8 @@ targets:
       path: Generated/Info.plist
       properties:
         CFBundleDisplayName: ずんだナビ
-        CFBundleShortVersionString: "0.2.11"
-        CFBundleVersion: "13"
+        CFBundleShortVersionString: "0.3.0"
+        CFBundleVersion: "14"
         UILaunchScreen: {}
         UISupportedInterfaceOrientations:
           - UIInterfaceOrientationPortrait
@@ -29,14 +29,15 @@ targets:
         NSLocationWhenInUseUsageDescription: 現在地に合わせて案内するために使います。
         NSCameraUsageDescription: 状況を写真で見せるためにカメラを使います。
         NSPhotoLibraryUsageDescription: 撮った写真を選んで送るために使います。
+        NSMotionUsageDescription: 改札やホームの階を当てるために、歩行と気圧のセンサーを使います。
         NSLocalNetworkUsageDescription: 同じネットワーク内のサーバーにつなぐために使います。
         NSAppTransportSecurity:
           NSAllowsArbitraryLoads: true
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: dev.momo.zundanavi
-        MARKETING_VERSION: "0.2.11"
-        CURRENT_PROJECT_VERSION: "13"
+        MARKETING_VERSION: "0.3.0"
+        CURRENT_PROJECT_VERSION: "14"
         TARGETED_DEVICE_FAMILY: "1"
         SWIFT_VERSION: "5.0"
         GENERATE_INFOPLIST_FILE: "NO"
