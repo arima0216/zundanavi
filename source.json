@@ -17,6 +17,14 @@
       "screenshots": [],
       "versions": [
         {
+          "version": "0.3.0",
+          "date": "2026-11-04",
+          "downloadURL": "https://github.com/arima0216/zundanavi/releases/download/v0.3.0/ZundaNavi.ipa",
+          "size": 658692,
+          "minOSVersion": "17.0",
+          "localizedDescription": "Automated build v0.3.0."
+        },
+        {
           "version": "0.2.11",
           "date": "2026-10-28",
           "downloadURL": "https://github.com/arima0216/zundanavi/releases/download/v0.2.11/ZundaNavi.ipa",
