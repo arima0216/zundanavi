@@ -834,19 +834,13 @@ final class AppModel: ObservableObject {
 
     private func sendPosition(_ l: CLLocation) {
         let now = Date()
-        let age = now.timeIntervalSince(l.timestamp)
-        // WP-11i: 端末側の棄却は最小限（acc<0 と、まだ送っていない 10 秒超の古い fix）。それ以外はサーバーに任せる
-        let alreadySent = lastPositionSent.map { $0.timestamp == l.timestamp } ?? false
-        switch FixGate.check(acc: l.horizontalAccuracy, ageS: age, alreadySent: alreadySent) {
+        // WP-11i: 端末側の棄却は acc<0 だけ。古い fix も fix_age_s 付きで送り、判断はサーバーに任せる
+        switch FixGate.check(acc: l.horizontalAccuracy) {
         case .send:
             break
         case .dropNoAccuracy:
             lastPositionSentAt = now
             LocationService.log.info("position dropped: acc<0")
-            return
-        case .dropStale:
-            lastPositionSentAt = now
-            LocationService.log.info("position dropped: stale fix age=\(Int(age), privacy: .public)s")
             return
         }
         lastPositionSentAt = now

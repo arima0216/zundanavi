@@ -499,14 +499,12 @@ do {
     check(c.steps == 0 && c.take().steps == 0, "steps: reset")
 }
 
-// FixGate: acc<0 と未送信の 10 秒超は落とす、送り直しは送る
-check(FixGate.check(acc: 8, ageS: 0.5, alreadySent: false) == .send, "gate: fresh fix")
-check(FixGate.check(acc: -1, ageS: 0.5, alreadySent: false) == .dropNoAccuracy, "gate: acc<0 dropped")
-check(FixGate.check(acc: 8, ageS: 10.5, alreadySent: false) == .dropStale, "gate: stale new fix dropped")
-check(FixGate.check(acc: 8, ageS: 10.0, alreadySent: false) == .send, "gate: 10s is not stale")
-check(FixGate.check(acc: 8, ageS: 40, alreadySent: true) == .send, "gate: resend of sent fix keeps 10s heartbeat")
-check(FixGate.check(acc: -1, ageS: 40, alreadySent: true) == .dropNoAccuracy, "gate: acc<0 dropped even on resend")
-check(FixGate.check(acc: 250, ageS: 1, alreadySent: false) == .send, "gate: large acc left to server")
+// FixGate (v0.3.1): acc<0 だけ落とす。古い fix は fix_age_s 付きで送る（判断はサーバー）
+check(FixGate.check(acc: 8) == .send, "gate: normal fix")
+check(FixGate.check(acc: -1) == .dropNoAccuracy, "gate: acc<0 dropped")
+check(FixGate.check(acc: Double.nan) == .dropNoAccuracy, "gate: NaN acc dropped")
+check(FixGate.check(acc: 0) == .send, "gate: acc 0 sent")
+check(FixGate.check(acc: 250) == .send, "gate: large acc left to server")
 
 // PositionExtras / GPSFix JSON
 do {

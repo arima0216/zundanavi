@@ -74,21 +74,16 @@ struct StepCounter: Equatable {
     }
 }
 
-/// 端末側の最小限の棄却。horizontalAccuracy < 0 と、まだ送っていない古い fix（10 秒超）は送らない。
-/// 一度送った fix を 10 秒ごとに送り直す（止まっていて新しい fix が来ない）ときは、
-/// 既存の 10 秒ごとの送信を保つために送る（fix_age_s で古さはサーバーに伝わる）。
+/// 端末側の最小限の棄却。horizontalAccuracy < 0（座標が無効）だけ送らない。
+/// 古い fix も落とさず fix_age_s を付けて送る（古さ・精度の判断はサーバー側。v0.3.1）。
 enum FixGate {
-    static let maxAge: Double = 10
-
     enum Verdict: Equatable {
         case send
         case dropNoAccuracy
-        case dropStale
     }
 
-    static func check(acc: Double, ageS: Double, alreadySent: Bool) -> Verdict {
+    static func check(acc: Double) -> Verdict {
         if acc < 0 || !acc.isFinite { return .dropNoAccuracy }
-        if ageS > maxAge && !alreadySent { return .dropStale }
         return .send
     }
 }
