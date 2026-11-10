@@ -2,6 +2,7 @@ import Foundation
 import os
 
 /// WS /v1/events。切れたら指数バックオフ（最大 30 秒）で再接続する。
+/// WP-15i: eid カーソルを持ち、再接続時に ?since=&boot= で切れていた間のイベントを取り直す。重複は捨てる。
 @MainActor
 final class EventsClient: ObservableObject {
     nonisolated static let log = Logger(subsystem: "dev.momo.zundanavi", category: "ws")
@@ -10,14 +11,16 @@ final class EventsClient: ObservableObject {
 
     /// (イベント, 生の JSON)
     var onEvent: ((WSEvent, Data) -> Void)?
-    /// 接続のたびに設定から要求を作る
-    var makeRequest: (() -> URLRequest?)?
+    /// 接続のたびに設定から要求を作る（引数はカーソルのクエリ。空なら付けない）
+    var makeRequest: (([URLQueryItem]) -> URLRequest?)?
 
     private var task: URLSessionWebSocketTask?
     private var backoff: TimeInterval = 1
     private var wantRunning = false
     private var generation = 0
     private var pingTimer: Timer?
+    /// WP-15i: プロセスが生きている間だけ持つ。stop()/restart() では消さない
+    private var cursor = EventCursor()
 
     func start() {
         wantRunning = true
@@ -40,9 +43,14 @@ final class EventsClient: ObservableObject {
         start()
     }
 
+    /// WP-15i: サーバー URL かトークンが変わった時に呼ぶ（別サーバーの番号を持ち越さない）
+    func resetCursor() {
+        cursor = EventCursor()
+    }
+
     private func connect() {
         guard wantRunning else { return }
-        guard let req = makeRequest?() else {
+        guard let req = makeRequest?(cursor.query()) else {
             EventsClient.log.info("ws: no request (bad url)")
             return
         }
@@ -104,14 +112,38 @@ final class EventsClient: ObservableObject {
             case .data(let d): data = d
             @unknown default: data = nil
             }
-            if let d = data, let ev = WSEvent.parse(d) {
-                onEvent?(ev, d)
+            if let d = data, let json = try? JSONValue.parse(d), json.objectValue != nil,
+               let ev = WSEvent.parse(json: json) {
+                deliver(ev, json: json, raw: d)
             }
             receive(t, gen)
         case .failure(let err):
             EventsClient.log.info("ws receive failed: \(err.localizedDescription, privacy: .public)")
             failed(gen)
         }
+    }
+
+    /// WP-15i: hello / pong はここで消費。それ以外は eid で重複を捨ててから渡す
+    private func deliver(_ ev: WSEvent, json: JSONValue, raw: Data) {
+        switch ev {
+        case .hello(let boot, let eid):
+            let before = cursor.lastEid
+            cursor.onHello(boot: boot, eid: eid)
+            let after = cursor.lastEid
+            EventsClient.log.info("ws hello boot=\(boot, privacy: .public) eid=\(eid) last=\(before)->\(after)")
+            return
+        case .pong:
+            return
+        default:
+            break
+        }
+        let env = WSEnvelope(json: json)
+        guard cursor.accept(eid: env.eid) else {
+            let dup = env.eid ?? -1
+            EventsClient.log.info("ws dup event eid=\(dup) dropped")
+            return
+        }
+        onEvent?(ev, raw)
     }
 
     private func failed(_ gen: Int) {

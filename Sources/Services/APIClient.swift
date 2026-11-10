@@ -122,8 +122,13 @@ struct APIClient {
     }
 
     /// WS /v1/events の接続要求（ヘッダでトークンを渡す）。
-    func eventsRequest() -> URLRequest? {
-        guard let url = Endpoint.websocketURL(base: baseURL, path: "/v1/events") else { return nil }
+    /// WP-15i: query（EventCursor.query()）があれば ?since=&boot= を足す
+    func eventsRequest(query: [URLQueryItem] = []) -> URLRequest? {
+        guard var url = Endpoint.websocketURL(base: baseURL, path: "/v1/events") else { return nil }
+        if !query.isEmpty, var comps = URLComponents(url: url, resolvingAgainstBaseURL: false) {
+            comps.queryItems = (comps.queryItems ?? []) + query
+            if let u = comps.url { url = u }
+        }
         var r = URLRequest(url: url)
         r.timeoutInterval = 30
         r.setValue(token, forHTTPHeaderField: "X-Trip-Token")

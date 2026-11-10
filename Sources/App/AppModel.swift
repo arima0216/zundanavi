@@ -110,6 +110,8 @@ final class AppModel: ObservableObject {
     private var lastPositionSent: CLLocation?
     /// request_id ごとに鳴らした text_voice（文字先行→音声後追いの二重再生を防ぐ）
     private var spokenReplies: [String: [String]] = [:]
+    /// WP-15i: WS カーソルがどのサーバー URL＋トークンのものか（変わったらカーソルを消す）
+    private var eventsScope: String?
 
     init() {
         settings = AppSettings()
@@ -127,8 +129,8 @@ final class AppModel: ObservableObject {
         guard !bootstrapped else { return }
         bootstrapped = true
 
-        events.makeRequest = { [weak self] in
-            return self?.api.eventsRequest()
+        events.makeRequest = { [weak self] query in
+            return self?.api.eventsRequest(query: query)
         }
         events.onEvent = { [weak self] ev, raw in
             self?.handleEvent(ev, raw: raw)
@@ -246,6 +248,12 @@ final class AppModel: ObservableObject {
             await loadFillers()
             await refreshCard()
         }
+        // WP-15i: 別サーバー（URL かトークンが変わった）の eid を持ち越さない
+        let scope = settings.serverURL + "\n" + settings.token
+        if let prev = eventsScope, prev != scope {
+            events.resetCursor()
+        }
+        eventsScope = scope
         events.restart()
     }
 
@@ -870,18 +878,23 @@ final class AppModel: ObservableObject {
         case .speak(let seq, let url, let text, let kind, let ttlSec):
             // WP-7: サーバー主導の案内（kind "guide"）は期限つき。過ぎて鳴らせなければ捨てる
             let isGuide = kind == "guide"
+            // WP-15i: 期限は ts + ttl（再接続で再送された古い案内を遅れて鳴らさない）。過ぎていたら履歴にだけ残す
+            let now = Date()
+            var expires: Date? = nil
+            if isGuide {
+                var ttl = AppModel.guideDefaultTTL
+                if let t = ttlSec, t > 0 { ttl = t }
+                expires = EventCursor.guideExpiry(now: now, ts: WSEnvelope.parse(raw).ts, ttl: ttl)
+            }
+            let expired = expires.map { $0 <= now } ?? false
             if !text.isEmpty {
-                reply.replied(text)
+                if !expired { reply.replied(text) }
                 history.add(HistoryEntry(role: isGuide ? "guide" : "push", text: text, audioURL: url))
             }
-            if let u = url, !recentlyPlayed(u) {
+            if expired {
+                AppModel.log.info("guide speak expired seq=\(seq) (replayed late), not played")
+            } else if let u = url, !recentlyPlayed(u) {
                 markPlayed(u)
-                var expires: Date? = nil
-                if isGuide {
-                    var ttl = AppModel.guideDefaultTTL
-                    if let t = ttlSec, t > 0 { ttl = t }
-                    expires = Date().addingTimeInterval(ttl)
-                }
                 let item = speech.enqueueSpeak(seq: seq, expiresAt: expires)
                 fetchAudio(u, into: item)
             }
@@ -906,6 +919,9 @@ final class AppModel: ObservableObject {
             scriptEvent(id: id, stepIdx: stepIdx, action: action)
         case .job(let ev):
             jobEvent(ev)
+        case .hello, .pong:
+            // WP-15i: EventsClient が消費するのでここには来ない
+            break
         case .unknown(let t):
             AppModel.log.info("unknown ws event \(t, privacy: .public)")
         }

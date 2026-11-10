@@ -283,6 +283,10 @@ enum WSEvent: Equatable {
     case job(JobEvent)
     /// WP-7: {"type":"stop"} 鳴っている案内を止める
     case stop
+    /// WP-15i: 接続直後の挨拶 {"type":"hello","boot":"<8 桁>","eid":<最終 eid>}。EventsClient が消費する
+    case hello(boot: String, eid: Int)
+    /// WP-15i: ping への返事。EventsClient が黙って捨てる
+    case pong
     case unknown(String)
 
     static func parse(_ data: Data) -> WSEvent? {
@@ -320,6 +324,10 @@ enum WSEvent: Equatable {
             return nil
         case "stop":
             return .stop
+        case "hello":
+            return .hello(boot: json["boot"]?.stringValue ?? "", eid: json["eid"]?.intValue ?? 0)
+        case "pong":
+            return .pong
         default:
             return .unknown(type)
         }

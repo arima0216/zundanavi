@@ -579,5 +579,66 @@ check(PositionExtras.battery(level: 0.5) == 0.5, "battery: 0.5")
 check(PositionExtras.battery(level: 1.0) == 1.0, "battery: full")
 check(PositionExtras.nonNegative(-1) == nil && PositionExtras.nonNegative(0) == 0, "nonNegative")
 
+// --- WP-15i: EventCursor / hello / eid ---
+do {
+    // hello / pong のパース（unknown に落ちない）
+    check(WSEvent.parse(data("{\"type\":\"hello\",\"boot\":\"ab12cd34\",\"eid\":17}")) == .hello(boot: "ab12cd34", eid: 17), "ws hello parsed")
+    check(WSEvent.parse(data("{\"type\":\"pong\",\"ts\":1792999000.5}")) == .pong, "ws pong parsed")
+    // eid / ts を生 JSON から読む
+    let env = WSEnvelope.parse(data("{\"type\":\"speak\",\"seq\":1,\"text\":\"x\",\"eid\":42,\"ts\":1792999000.25}"))
+    check(env.eid == 42 && env.ts == 1792999000.25, "envelope eid/ts")
+    check(WSEnvelope.parse(data("{\"type\":\"pong\"}")) == WSEnvelope(), "envelope pong has no eid")
+    check(WSEnvelope.parse(data("not json")) == WSEnvelope(), "envelope garbage")
+    check(WSEnvelope.parse(data("{\"type\":\"speak\",\"eid\":0}")).eid == nil, "envelope eid 0 -> nil")
+
+    // query は boot 無しでは空
+    var c = EventCursor()
+    check(c.query().isEmpty, "cursor: empty query before hello")
+    check(EventCursor(boot: nil, lastEid: 5).query().isEmpty, "cursor: no boot -> empty query")
+    check(EventCursor(boot: "b1", lastEid: 0).query().isEmpty, "cursor: lastEid 0 -> empty query")
+
+    // 初回 hello: boot を入れて lastEid = hello の eid
+    c.onHello(boot: "b1", eid: 10)
+    check(c.boot == "b1" && c.lastEid == 10, "cursor: first hello sets boot and lastEid")
+    check(c.query() == [URLQueryItem(name: "since", value: "10"), URLQueryItem(name: "boot", value: "b1")], "cursor: query since/boot")
+    check(c.accept(eid: 11) && c.lastEid == 11, "cursor: new eid accepted")
+    check(c.accept(eid: 12) && c.lastEid == 12, "cursor: next eid accepted")
+
+    // 同じ boot で再接続: lastEid は変えない → 再送分のうち新しいものだけ通る、重複は捨てる
+    c.onHello(boot: "b1", eid: 15)
+    check(c.lastEid == 12, "cursor: same boot hello keeps lastEid")
+    check(c.query() == [URLQueryItem(name: "since", value: "12"), URLQueryItem(name: "boot", value: "b1")], "cursor: query after reconnect")
+    check(!c.accept(eid: 12), "cursor: duplicate eid dropped")
+    check(!c.accept(eid: 7), "cursor: older eid dropped")
+    check(c.accept(eid: 13) && c.accept(eid: 15), "cursor: replayed newer eids accepted")
+    check(!c.accept(eid: 15), "cursor: replay + live duplicate dropped")
+    check(c.lastEid == 15, "cursor: lastEid advanced by replay")
+
+    // eid 無し（pong など）は通す・lastEid は変えない
+    check(c.accept(eid: nil) && c.lastEid == 15, "cursor: no eid passes")
+
+    // boot 変更（サーバー再起動）: lastEid = hello の eid、巻き戻った番号もそれより後なら通る
+    c.onHello(boot: "b2", eid: 3)
+    check(c.boot == "b2" && c.lastEid == 3, "cursor: boot change resets lastEid to hello eid")
+    check(!c.accept(eid: 2), "cursor: pre-hello eid on new boot dropped")
+    check(c.accept(eid: 4), "cursor: new boot eid accepted")
+    check(c.query() == [URLQueryItem(name: "since", value: "4"), URLQueryItem(name: "boot", value: "b2")], "cursor: query uses new boot")
+
+    // hello 前は番号で捨てない（boot 不明）
+    var pre = EventCursor()
+    check(pre.accept(eid: 9) && pre.accept(eid: 1), "cursor: before hello nothing dropped")
+    pre.onHello(boot: "b3", eid: 0)
+    check(pre.lastEid == 0 && pre.query().isEmpty, "cursor: hello eid 0 -> no since yet")
+    check(pre.accept(eid: 1) && pre.query().count == 2, "cursor: first event after hello enables since")
+
+    // guide の期限: ts + ttl。時計差 300 秒超は now + ttl
+    let now = Date(timeIntervalSince1970: 1_800_000_000)
+    check(EventCursor.guideExpiry(now: now, ts: 1_800_000_000 - 60, ttl: 30) == Date(timeIntervalSince1970: 1_800_000_000 - 30), "expiry: replayed guide uses ts+ttl (past)")
+    check(EventCursor.guideExpiry(now: now, ts: 1_800_000_000 - 5, ttl: 30) == Date(timeIntervalSince1970: 1_800_000_025), "expiry: fresh guide ts+ttl")
+    check(EventCursor.guideExpiry(now: now, ts: nil, ttl: 20) == now.addingTimeInterval(20), "expiry: no ts -> now+ttl")
+    check(EventCursor.guideExpiry(now: now, ts: 1_800_000_000 - 301, ttl: 20) == now.addingTimeInterval(20), "expiry: skew > 300 -> now+ttl")
+    check(EventCursor.guideExpiry(now: now, ts: 1_800_000_000 + 400, ttl: 20) == now.addingTimeInterval(20), "expiry: device behind > 300 -> now+ttl")
+}
+
 print("logic tests: \(passes) passed, \(failures) failed")
 if failures > 0 { exit(1) }
