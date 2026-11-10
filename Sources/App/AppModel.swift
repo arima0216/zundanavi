@@ -878,13 +878,13 @@ final class AppModel: ObservableObject {
         case .speak(let seq, let url, let text, let kind, let ttlSec):
             // WP-7: サーバー主導の案内（kind "guide"）は期限つき。過ぎて鳴らせなければ捨てる
             let isGuide = kind == "guide"
-            // WP-15i: 期限は ts + ttl（再接続で再送された古い案内を遅れて鳴らさない）。過ぎていたら履歴にだけ残す
+            // WP-15i: 再送された案内は replay_age の分だけ期限を前倒し（古い案内を遅れて鳴らさない）。過ぎていたら履歴にだけ残す
             let now = Date()
             var expires: Date? = nil
             if isGuide {
                 var ttl = AppModel.guideDefaultTTL
                 if let t = ttlSec, t > 0 { ttl = t }
-                expires = EventCursor.guideExpiry(now: now, ts: WSEnvelope.parse(raw).ts, ttl: ttl)
+                expires = EventCursor.guideExpiry(now: now, replayAge: WSEnvelope.parse(raw).replayAge, ttl: ttl)
             }
             let expired = expires.map { $0 <= now } ?? false
             if !text.isEmpty {

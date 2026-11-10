@@ -43,31 +43,29 @@ struct EventCursor: Equatable {
         return true
     }
 
-    /// WP-15i: speak（guide）の期限。イベントの ts があれば ts + ttl。
-    /// ただし端末とサーバーの時計差が大きい（|now - ts| > maxSkew）時は従来どおり now + ttl。
-    static let maxClockSkew: TimeInterval = 300
-
-    static func guideExpiry(now: Date, ts: Double?, ttl: TimeInterval) -> Date {
-        if let t = ts, t.isFinite, abs(now.timeIntervalSince1970 - t) <= maxClockSkew {
-            return Date(timeIntervalSince1970: t + ttl)
-        }
-        return now.addingTimeInterval(ttl)
+    /// WP-15i: speak（guide）の期限。普段は now + ttl。
+    /// 再接続で再送されたイベントにはサーバーが replay_age（出してからの経過秒。サーバーの時計だけで計算）を付けるので、
+    /// その分だけ期限を前倒しする。端末とサーバーの時計差には依存しない。
+    static func guideExpiry(now: Date, replayAge: Double?, ttl: TimeInterval) -> Date {
+        var age: Double = 0
+        if let a = replayAge, a.isFinite, a > 0 { age = a }
+        return now.addingTimeInterval(ttl - age)
     }
 }
 
-/// WP-15i: WS イベントの共通フィールド（eid / ts）。生 JSON から読む。
+/// WP-15i: WS イベントの共通フィールド（eid / replay_age）。生 JSON から読む。
 struct WSEnvelope: Equatable {
     var eid: Int?
-    var ts: Double?
+    var replayAge: Double?
 
-    init(eid: Int? = nil, ts: Double? = nil) {
+    init(eid: Int? = nil, replayAge: Double? = nil) {
         self.eid = eid
-        self.ts = ts
+        self.replayAge = replayAge
     }
 
     init(json: JSONValue) {
         if let e = json["eid"]?.intValue, e > 0 { eid = e } else { eid = nil }
-        if let t = json["ts"]?.doubleValue, t.isFinite { ts = t } else { ts = nil }
+        if let t = json["replay_age"]?.doubleValue, t.isFinite { replayAge = t } else { replayAge = nil }
     }
 
     static func parse(_ data: Data) -> WSEnvelope {

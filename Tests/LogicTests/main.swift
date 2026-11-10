@@ -584,9 +584,11 @@ do {
     // hello / pong のパース（unknown に落ちない）
     check(WSEvent.parse(data("{\"type\":\"hello\",\"boot\":\"ab12cd34\",\"eid\":17}")) == .hello(boot: "ab12cd34", eid: 17), "ws hello parsed")
     check(WSEvent.parse(data("{\"type\":\"pong\",\"ts\":1792999000.5}")) == .pong, "ws pong parsed")
-    // eid / ts を生 JSON から読む
-    let env = WSEnvelope.parse(data("{\"type\":\"speak\",\"seq\":1,\"text\":\"x\",\"eid\":42,\"ts\":1792999000.25}"))
-    check(env.eid == 42 && env.ts == 1792999000.25, "envelope eid/ts")
+    // eid / replay_age を生 JSON から読む
+    let env = WSEnvelope.parse(data("{\"type\":\"speak\",\"seq\":1,\"text\":\"x\",\"eid\":42,\"ts\":1792999000.25,\"replay_age\":12.5}"))
+    check(env.eid == 42, "envelope eid")
+    check(env.replayAge == 12.5, "envelope replay_age")
+    check(WSEnvelope.parse(data("{\"type\":\"speak\",\"eid\":43,\"ts\":1792999000.25}")).replayAge == nil, "envelope live event has no replay_age")
     check(WSEnvelope.parse(data("{\"type\":\"pong\"}")) == WSEnvelope(), "envelope pong has no eid")
     check(WSEnvelope.parse(data("not json")) == WSEnvelope(), "envelope garbage")
     check(WSEnvelope.parse(data("{\"type\":\"speak\",\"eid\":0}")).eid == nil, "envelope eid 0 -> nil")
@@ -631,13 +633,12 @@ do {
     check(pre.lastEid == 0 && pre.query().isEmpty, "cursor: hello eid 0 -> no since yet")
     check(pre.accept(eid: 1) && pre.query().count == 2, "cursor: first event after hello enables since")
 
-    // guide の期限: ts + ttl。時計差 300 秒超は now + ttl
+    // guide の期限: now + ttl。再送分は replay_age だけ前倒し（時計差に依存しない）
     let now = Date(timeIntervalSince1970: 1_800_000_000)
-    check(EventCursor.guideExpiry(now: now, ts: 1_800_000_000 - 60, ttl: 30) == Date(timeIntervalSince1970: 1_800_000_000 - 30), "expiry: replayed guide uses ts+ttl (past)")
-    check(EventCursor.guideExpiry(now: now, ts: 1_800_000_000 - 5, ttl: 30) == Date(timeIntervalSince1970: 1_800_000_025), "expiry: fresh guide ts+ttl")
-    check(EventCursor.guideExpiry(now: now, ts: nil, ttl: 20) == now.addingTimeInterval(20), "expiry: no ts -> now+ttl")
-    check(EventCursor.guideExpiry(now: now, ts: 1_800_000_000 - 301, ttl: 20) == now.addingTimeInterval(20), "expiry: skew > 300 -> now+ttl")
-    check(EventCursor.guideExpiry(now: now, ts: 1_800_000_000 + 400, ttl: 20) == now.addingTimeInterval(20), "expiry: device behind > 300 -> now+ttl")
+    check(EventCursor.guideExpiry(now: now, replayAge: nil, ttl: 20) == now.addingTimeInterval(20), "expiry: live -> now+ttl")
+    check(EventCursor.guideExpiry(now: now, replayAge: 5, ttl: 30) == now.addingTimeInterval(25), "expiry: replayed 5s ago -> 25s left")
+    check(EventCursor.guideExpiry(now: now, replayAge: 60, ttl: 30) < now, "expiry: replayed too late -> already past")
+    check(EventCursor.guideExpiry(now: now, replayAge: -3, ttl: 20) == now.addingTimeInterval(20), "expiry: negative age ignored")
 }
 
 print("logic tests: \(passes) passed, \(failures) failed")
